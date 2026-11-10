@@ -1,11 +1,13 @@
 import { TILE, UNITS, BUILDINGS, def, nameOf, TPS } from './data.js';
-import { T_GRASS, T_FOREST, T_WATER, T_ROCK, T_DIRT, T_STUMP } from './map.js';
+import { T_FOREST, T_ROCK } from './map.js';
 import * as S from './sprites.js';
 import { c, rgb, teamCSS } from './palette.js';
+import { paintGround, waterFrame, WATER_FRAMES, treeClump, rockClump, TREE, ROCKV, MINI_COL } from './terrain.js';
 
 export const VIEW = { x: 176, y: 16, w: 464, h: 448 };
 export const MINI = { x: 24, y: 14, s: 128 };
-const CHUNK = 16;
+const CHUNK = 8;
+const UO = S.UNIT_OFF, BO = S.BUILD_OFF;
 
 function h2(x, y) { let h = (x * 374761393 + y * 668265263) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return (h ^ (h >>> 16)) >>> 0; }
 
@@ -18,34 +20,19 @@ export class Renderer {
     this.explored = new Uint8Array(N); this.visible = new Uint8Array(N);
     this.chunks = new Map();
     this.effects = []; this.frame = 0; this.revealAll = false;
-    this.tiles = {
-      grass: [0, 1, 2, 3].map(v => S.grassTile(v).toCanvas(S.lut(0))),
-      dirt: [0, 1].map(() => S.dirtTile().toCanvas(S.lut(0))),
-      water: [0, 1, 2, 3].map(f => S.waterTile(f)),
-      stump: [S.stumpTile().toCanvas(S.lut(0))],
-      tree: [0, 1, 2, 3].map(v => S.treeTile(v).toCanvas(S.lut(0))),
-      rock: [0, 1, 2].map(v => S.rockTile(v).toCanvas(S.lut(0))),
-    };
-    this.waterCv = this.tiles.water.map(i => i.toCanvas(S.lut(0)));
-    this.shore = []; this.shoreC = []; this.dirtE = [];
-    for (let m = 0; m < 16; m++) { this.shore[m] = S.edgeOverlay(m, 'sand', 2, 5, true).toCanvas(S.lut(0)); this.dirtE[m] = S.edgeOverlay(m, 'grass', 3, 4, false).toCanvas(S.lut(0)); }
-    for (let k = 0; k < 4; k++) this.shoreC[k] = S.cornerOverlay(k, 'sand', 2, 5, true).toCanvas(S.lut(0));
+    const l0 = S.lut(0);
+    this.waterPat = []; for (let f = 0; f < WATER_FRAMES; f++) this.waterPat.push(this.ctx.createPattern(waterFrame(f).toCanvas(l0), 'repeat'));
+    this.trees = [0, 1, 2, 3, 4, 5].map(v => treeClump(v).toCanvas(l0));
+    this.rocks = [0, 1, 2, 3].map(v => rockClump(v).toCanvas(l0));
     this.panel = S.stonePanel(176, 480);
     this.topbar = S.woodPanel(640, 16);
+    this.fogCv = document.createElement('canvas'); this.fogCv.width = this.fogCv.height = 18;
     this.mini = document.createElement('canvas'); this.mini.width = this.mini.height = MINI.s;
     this.miniFog = document.createElement('canvas'); this.miniFog.width = game.w; this.miniFog.height = game.h;
     this.miniVer = -1;
-    this.fogPat = this.makeFogPattern();
     const st = game.starts[me] || game.starts[0];
     if (st) this.centerOn(st.x * TILE + 64, st.y * TILE + 64);
     this.computeVis();
-  }
-
-  makeFogPattern() {
-    const cv = document.createElement('canvas'); cv.width = cv.height = 32; const x = cv.getContext('2d');
-    x.fillStyle = 'rgba(0,0,0,0.55)'; x.fillRect(0, 0, 32, 32);
-    x.fillStyle = 'rgba(0,0,0,0.35)'; for (let j = 0; j < 32; j++) for (let i = (j % 2); i < 32; i += 2) x.fillRect(i, j, 1, 1);
-    return cv;
   }
 
   centerOn(px, py) { this.cam.x = px - VIEW.w / 2; this.cam.y = py - VIEW.h / 2; this.clampCam(); }
@@ -90,44 +77,26 @@ export class Renderer {
   // ------------------------------------------------------------ terrain chunks
   tileAt(x, y) { const g = this.g; if (x < 0 || y < 0 || x >= g.w || y >= g.h) return T_FOREST; return g.terrain[y * g.w + x]; }
   invalidateTile(x, y) {
-    for (const [dx, dy] of [[0, 0], [0, 1], [1, 0], [-1, 0], [0, -1]]) {
-      const k = ((x + dx) / CHUNK | 0) + ',' + ((y + dy) / CHUNK | 0); const ch = this.chunks.get(k); if (ch) ch.dirty = true;
+    // a changed tile repaints the 3x3 tiles around it in whichever chunks they touch
+    for (let cy = ((y - 1) / CHUNK) | 0; cy <= ((y + 1) / CHUNK) | 0; cy++) for (let cx = ((x - 1) / CHUNK) | 0; cx <= ((x + 1) / CHUNK) | 0; cx++) {
+      const ch = this.chunks.get(cx + ',' + cy); if (ch && !ch.dirty) ch.patch.push([x, y]);
     }
   }
+  chunkReady(cx, cy) { const ch = this.chunks.get(cx + ',' + cy); return ch && !ch.dirty; }
   drawChunk(cx, cy) {
     const k = cx + ',' + cy; let ch = this.chunks.get(k);
-    if (!ch) { const cv = document.createElement('canvas'); cv.width = CHUNK * TILE; cv.height = CHUNK * TILE + 12; ch = { cv, dirty: true }; this.chunks.set(k, ch); }
-    if (!ch.dirty) return ch;
-    const x0 = cx * CHUNK, y0 = cy * CHUNK, ctx = ch.cv.getContext('2d'); ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, ch.cv.width, ch.cv.height);
-    for (let ty = 0; ty < CHUNK; ty++) for (let tx = 0; tx < CHUNK; tx++) {
-      const X = x0 + tx, Y = y0 + ty; if (X >= this.g.w || Y >= this.g.h) continue;
-      const t = this.tileAt(X, Y), hv = h2(X, Y), px = tx * TILE, py = ty * TILE + 12;
-      if (t === T_WATER) {
-        ctx.drawImage(this.waterCv[hv % 4], px, py);
-        const land = (a, b) => this.tileAt(a, b) !== T_WATER;
-        const m = (land(X, Y - 1) ? 1 : 0) | (land(X + 1, Y) ? 2 : 0) | (land(X, Y + 1) ? 4 : 0) | (land(X - 1, Y) ? 8 : 0);
-        if (m) ctx.drawImage(this.shore[m], px, py);
-        if (!(m & 3) && land(X + 1, Y - 1)) ctx.drawImage(this.shoreC[0], px, py);
-        if (!(m & 6) && land(X + 1, Y + 1)) ctx.drawImage(this.shoreC[1], px, py);
-        if (!(m & 12) && land(X - 1, Y + 1)) ctx.drawImage(this.shoreC[2], px, py);
-        if (!(m & 9) && land(X - 1, Y - 1)) ctx.drawImage(this.shoreC[3], px, py);
-      } else if (t === T_DIRT) {
-        ctx.drawImage(this.tiles.dirt[hv % 2], px, py);
-        const gr = (a, b) => { const q = this.tileAt(a, b); return q === T_GRASS || q === T_STUMP; };
-        const m = (gr(X, Y - 1) ? 1 : 0) | (gr(X + 1, Y) ? 2 : 0) | (gr(X, Y + 1) ? 4 : 0) | (gr(X - 1, Y) ? 8 : 0);
-        if (m) ctx.drawImage(this.dirtE[m], px, py);
-      } else if (t === T_STUMP) ctx.drawImage(this.tiles.stump[0], px, py);
-      else ctx.drawImage(this.tiles.grass[hv % 7 === 0 ? 3 : hv % 3], px, py);
+    if (!ch) { const cv = document.createElement('canvas'); cv.width = cv.height = CHUNK * TILE; ch = { cv, dirty: true, patch: [] }; this.chunks.set(k, ch); }
+    const x0 = cx * CHUNK, y0 = cy * CHUNK, tile = (x, y) => this.tileAt(x, y);
+    if (ch.dirty) {
+      const ctx = ch.cv.getContext('2d'); ctx.clearRect(0, 0, ch.cv.width, ch.cv.height);
+      ctx.drawImage(paintGround(tile, x0, y0, CHUNK, CHUNK).toCanvas(S.lut(0)), 0, 0);
+      ch.dirty = false; ch.patch.length = 0;
+    } else if (ch.patch.length) {
+      const ctx = ch.cv.getContext('2d');
+      for (const [x, y] of ch.patch) { const px = (x - 1 - x0) * TILE, py = (y - 1 - y0) * TILE; ctx.clearRect(px, py, 96, 96); ctx.drawImage(paintGround(tile, x - 1, y - 1, 3, 3).toCanvas(S.lut(0)), px, py); }
+      ch.patch.length = 0;
     }
-    // tall stuff (trees, rocks) drawn in row order with overhang
-    for (let ty = 0; ty < CHUNK; ty++) for (let tx = 0; tx < CHUNK; tx++) {
-      const X = x0 + tx, Y = y0 + ty; if (X >= this.g.w || Y >= this.g.h) continue;
-      const t = this.tileAt(X, Y), hv = h2(X, Y), px = tx * TILE, py = ty * TILE;
-      if (t === T_FOREST) ctx.drawImage(this.tiles.tree[hv % 4], px, py);
-      else if (t === T_ROCK) ctx.drawImage(this.tiles.rock[hv % 3], px, py);
-    }
-    ch.dirty = false; return ch;
+    return ch;
   }
 
   // ------------------------------------------------------------ events from sim
@@ -135,8 +104,8 @@ export class Renderer {
     if (ev.t === 'tree') { this.invalidateTile(ev.x, ev.y); this.miniVer = -1; }
     else if (ev.t === 'die') {
       if (ev.unit) this.effects.push({ k: 'corpse', x: ev.x, y: ev.y, type: ev.type, faction: ev.faction, team: this.g.players[ev.owner]?.color ?? 0, t: 0, life: 30 * TPS });
-      else if (ev.type !== 'mine' || true) { if (!ev.silent) this.effects.push({ k: 'rubble', x: ev.x, y: ev.y, size: ev.size, t: 0, life: 60 * TPS }); for (let i = 0; i < ev.size * 2; i++) this.effects.push({ k: 'boom', x: ev.x + (h2(i, ev.x) % (ev.size * 10)) / 10, y: ev.y + (h2(ev.y, i) % (ev.size * 10)) / 10, t: -i * 2, life: 12 }); }
-    } else if (ev.t === 'boom') this.effects.push({ k: 'boom', x: ev.x - 0.5, y: ev.y - 0.5, t: 0, life: 12 });
+      else if (ev.type !== 'mine' || true) { if (!ev.silent) this.effects.push({ k: 'rubble', x: ev.x, y: ev.y, size: ev.size, t: 0, life: 60 * TPS }); for (let i = 0; i < ev.size * 2; i++) this.effects.push({ k: 'boom', x: ev.x + (h2(i, ev.x) % (ev.size * 10)) / 10, y: ev.y + (h2(ev.y, i) % (ev.size * 10)) / 10, t: -i * 2, life: 15 }); }
+    } else if (ev.t === 'boom') this.effects.push({ k: 'boom', x: ev.x - 0.5, y: ev.y - 0.5, t: 0, life: 15 });
   }
 
   // ------------------------------------------------------------ main draw
@@ -146,24 +115,24 @@ export class Renderer {
     ctx.save();
     ctx.beginPath(); ctx.rect(VIEW.x, VIEW.y, VIEW.w, VIEW.h); ctx.clip();
     ctx.translate(VIEW.x - this.cam.x, VIEW.y - this.cam.y);
-    // terrain
-    const cx0 = Math.floor(this.cam.x / (CHUNK * TILE)), cy0 = Math.floor(this.cam.y / (CHUNK * TILE));
-    const cx1 = Math.floor((this.cam.x + VIEW.w) / (CHUNK * TILE)), cy1 = Math.floor((this.cam.y + VIEW.h + 12) / (CHUNK * TILE));
+    // water first: the ground chunks are transparent over open water
+    ctx.fillStyle = this.waterPat[(this.frame >> 3) % WATER_FRAMES]; ctx.fillRect(this.cam.x, this.cam.y, VIEW.w, VIEW.h);
+    const CP = CHUNK * TILE;
+    const cx0 = Math.floor(this.cam.x / CP), cy0 = Math.floor(this.cam.y / CP), cx1 = Math.floor((this.cam.x + VIEW.w - 1) / CP), cy1 = Math.floor((this.cam.y + VIEW.h - 1) / CP);
     for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) {
       if (cx * CHUNK >= g.w || cy * CHUNK >= g.h) continue;
-      const ch = this.drawChunk(cx, cy); ctx.drawImage(ch.cv, cx * CHUNK * TILE, cy * CHUNK * TILE - 12);
+      ctx.drawImage(this.drawChunk(cx, cy).cv, cx * CP, cy * CP);
+    }
+    // paint one chunk just outside the view per frame so scrolling stays smooth
+    pre: for (let cy = cy0 - 1; cy <= cy1 + 1; cy++) for (let cx = cx0 - 1; cx <= cx1 + 1; cx++) {
+      if (cx < 0 || cy < 0 || cx * CHUNK >= g.w || cy * CHUNK >= g.h || this.chunkReady(cx, cy)) continue;
+      this.drawChunk(cx, cy); break pre;
     }
     const tx0 = Math.floor(this.cam.x / TILE), ty0 = Math.floor(this.cam.y / TILE), tx1 = Math.min(g.w - 1, tx0 + 15), ty1 = Math.min(g.h - 1, ty0 + 15);
-    // water shimmer
-    const wf = (this.frame >> 4) % 4;
-    for (let y = ty0; y <= ty1; y++) for (let x = tx0; x <= tx1; x++) {
-      if (g.terrain[y * g.w + x] !== T_WATER) continue; const hv = h2(x, y);
-      if ((hv + wf) % 4 === 0) { ctx.fillStyle = 'rgba(200,230,255,0.5)'; ctx.fillRect(x * TILE + (hv % 20) + 4, y * TILE + ((hv >> 5) % 22) + 4 + (wf & 1), 4, 1); }
-    }
     // ground effects
     for (const f of this.effects) {
-      if (f.k === 'rubble') ctx.drawImage(S.rubbleSprite(f.size), f.x * TILE, f.y * TILE);
-      else if (f.k === 'corpse' && this.visible[f.y * g.w + f.x]) ctx.drawImage(S.corpseSprite(f.type, f.faction, f.team, f.t > f.life * 0.5 ? 2 : 0), f.x * TILE, f.y * TILE);
+      if (f.k === 'rubble') ctx.drawImage(S.rubbleSprite(f.size), f.x * TILE - 4, f.y * TILE - 4);
+      else if (f.k === 'corpse' && this.visible[f.y * g.w + f.x]) ctx.drawImage(S.corpseSprite(f.type, f.faction, f.team, f.t > f.life * 0.5 ? 2 : 0), f.x * TILE - UO.x, f.y * TILE - UO.y);
     }
     // placement grid for building ghost under entities
     const sel = new Set(ui.selection);
@@ -181,29 +150,34 @@ export class Renderer {
       const f = Math.max(0, Math.min(1, (e.mp - alpha) / e.mt));
       return [(e.x - (e.x - e.px) * f) * TILE, (e.y - (e.y - e.py) * f) * TILE];
     };
+    // trees and rocks join the depth sort so units can walk behind them
+    for (let y = Math.max(0, ty0 - 1); y <= Math.min(g.h - 1, ty1 + 2); y++) for (let x = Math.max(0, tx0 - 1); x <= Math.min(g.w - 1, tx1 + 1); x++) {
+      const t = g.terrain[y * g.w + x];
+      if (t === T_FOREST) list.push({ prop: this.trees[h2(x, y) % 6], x, y, size: 1, id: 0, ox: TREE.ox, oy: TREE.oy });
+      else if (t === T_ROCK) list.push({ prop: this.rocks[h2(x, y) % 4], x, y, size: 1, id: 0, ox: ROCKV.ox, oy: ROCKV.oy });
+    }
     list.sort((a, b) => (a.y + a.size) - (b.y + b.size) || a.id - b.id);
+    for (const e of list) if (!e.prop && sel.has(e.id)) { const [px, py] = posOf(e); this.selBox(e, px, py); }
     for (const e of list) {
+      if (e.prop) { ctx.drawImage(e.prop, e.x * TILE - e.ox, e.y * TILE - e.oy); continue; }
       const [px, py] = posOf(e); e._px = px; e._py = py;
       const P = g.players[e.owner], team = P ? P.color : 0, fac = P ? P.faction : 0;
-      if (sel.has(e.id)) this.selBox(e, px, py);
       if (e.unit) {
         let frame = 'idle';
         const chopping = e.order && e.order.type === 'gather' && e.order.phase === 'chop';
-        if (e.anim > 0) frame = e.anim > 5 ? 'atk0' : 'atk1';
-        else if (e.mp > 0 || (e.path && e.order)) frame = ((g.tick >> 2) + e.id) % 2 ? 'walk0' : 'walk1';
-        if (chopping) frame = (g.tick >> 3) % 2 ? 'atk0' : 'atk1';
-        const sp = S.unitSprite(e.type, fac, team, frame, e.carry ? e.carryKind : null, chopping);
-        ctx.save(); ctx.translate(Math.round(px) + 16, Math.round(py));
-        if (e.facing < 0) ctx.scale(-1, 1);
-        ctx.drawImage(sp, -16, 0); ctx.restore();
+        if (chopping) { const ph = (g.tick + e.id * 3) % 14; frame = ph < 5 ? 'atk0' : ph < 9 ? 'atk1' : 'atk2'; }
+        else if (e.anim > 0) frame = e.type === 'siege' ? (e.anim > 7 ? 'atk0' : 'atk1') : e.anim > 6 ? 'atk0' : e.anim > 3 ? 'atk1' : 'atk2';
+        else if (e.mp > 0 || (e.path && e.order)) frame = 'walk' + (((g.tick >> 1) + e.id) & 3);
+        const sp = S.unitSprite(e.type, fac, team, frame, e.carry ? e.carryKind : null, chopping, this.dirOf(e));
+        ctx.drawImage(sp, Math.round(px) - UO.x, Math.round(py) - UO.y);
       } else {
         const d = BUILDINGS[e.type];
-        const stage = e.built ? 2 : (e.progress / d.time < 0.5 ? 0 : 1);
-        ctx.drawImage(S.buildingSprite(e.type, fac, team, stage), px, py - 16);
+        const stage = e.built ? 2 : (e.progress / d.time < 0.4 ? 0 : 1);
+        ctx.drawImage(S.buildingSprite(e.type, fac, team, stage), px - BO.x, py - BO.y);
         if (e.built && e.type !== 'mine' && e.hp < e.maxHp / 2) {
-          const big = e.hp < e.maxHp / 4; const fr = ((this.frame >> 3) + e.id) % 4;
-          ctx.drawImage(S.fireSprite(fr, big), px + e.size * 16 - (big ? 12 : 8), py + e.size * 8 - 8);
-          if (big) ctx.drawImage(S.fireSprite((fr + 2) % 4, false), px + e.size * 6, py + e.size * 18 - 16);
+          const big = e.hp < e.maxHp / 4; const fr = ((this.frame >> 2) + e.id) % 6, s = e.size * TILE;
+          ctx.drawImage(S.fireSprite(fr, big), px + s * 0.5 - (big ? 13 : 8), py + s * 0.45 - (big ? 38 : 24));
+          if (big) { ctx.drawImage(S.fireSprite((fr + 2) % 6, false), px + s * 0.2, py + s * 0.7 - 24); ctx.drawImage(S.fireSprite((fr + 4) % 6, false), px + s * 0.72, py + s * 0.3 - 24); }
         }
       }
     }
@@ -219,29 +193,28 @@ export class Renderer {
       if (m.kind !== 'rock') ctx.rotate(Math.atan2((m.ty - m.sy) * TILE - Math.cos(t * Math.PI) * 10 * Math.PI, (m.tx - m.sx) * TILE));
       ctx.drawImage(sp, -sp.width / 2, -sp.height / 2); ctx.restore();
     }
-    for (const f of this.effects) if (f.k === 'boom' && f.t >= 0) ctx.drawImage(S.boomSprite(Math.min(3, (f.t / 3) | 0)), f.x * TILE, f.y * TILE);
+    for (const f of this.effects) if (f.k === 'boom' && f.t >= 0) ctx.drawImage(S.boomSprite(Math.min(4, (f.t / 3) | 0)), f.x * TILE - 8, f.y * TILE - 8);
     // health bars for selected
-    for (const e of list) if (sel.has(e.id) && e.type !== 'mine') this.hpBar(e, e._px, e._py);
+    for (const e of list) if (!e.prop && sel.has(e.id) && e.type !== 'mine') this.hpBar(e, e._px, e._py);
     // rally point
     if (ui.selection.length === 1) { const b = g.get(ui.selection[0]); if (b && !b.unit && b.rally && b.owner === this.me) this.rallyFlag(b.rally.x * TILE, b.rally.y * TILE); }
     // building ghost
     if (ui.mode === 'place' && ui.mouse.inView) this.ghost(ui);
-    // fog
+    // fog of war: hard black over the unknown, with soft edges bleeding into known ground
     if (!this.revealAll && this.me >= 0) {
-      for (let y = ty0; y <= ty1; y++) for (let x = tx0; x <= tx1; x++) {
-        const i = y * g.w + x;
-        if (!this.explored[i]) { ctx.fillStyle = '#000'; ctx.fillRect(x * TILE, y * TILE, TILE, TILE); }
-        else if (!this.visible[i]) ctx.drawImage(this.fogPat, x * TILE, y * TILE);
+      const fw = 18, fc = this.fogCv.getContext('2d'), id = fc.createImageData(fw, fw), fx0 = tx0 - 1, fy0 = ty0 - 1;
+      ctx.fillStyle = '#000';
+      for (let y = 0; y < fw; y++) for (let x = 0; x < fw; x++) {
+        const X = fx0 + x, Y = fy0 + y, inb = X >= 0 && Y >= 0 && X < g.w && Y < g.h, i = Y * g.w + X;
+        const a = !inb ? 255 : !this.explored[i] ? 255 : !this.visible[i] ? 105 : 0;
+        id.data[(y * fw + x) * 4 + 3] = a;
+        if (inb && !this.explored[i]) { // solid black only where no known ground is adjacent, so the edge stays soft
+          let near = false; for (let oy = -1; oy <= 1 && !near; oy++) for (let ox = -1; ox <= 1; ox++) { const xx = X + ox, yy = Y + oy; if (xx >= 0 && yy >= 0 && xx < g.w && yy < g.h && this.explored[yy * g.w + xx]) { near = true; break; } }
+          if (!near) ctx.fillRect(X * TILE, Y * TILE, TILE, TILE);
+        }
       }
-      // soften black edges
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      for (let y = ty0; y <= ty1; y++) for (let x = tx0; x <= tx1; x++) {
-        const i = y * g.w + x; if (!this.explored[i]) continue;
-        if (x > 0 && !this.explored[i - 1]) ctx.fillRect(x * TILE, y * TILE, 6, TILE);
-        if (x < g.w - 1 && !this.explored[i + 1]) ctx.fillRect(x * TILE + 26, y * TILE, 6, TILE);
-        if (y > 0 && !this.explored[i - g.w]) ctx.fillRect(x * TILE, y * TILE, TILE, 6);
-        if (y < g.h - 1 && !this.explored[i + g.w]) ctx.fillRect(x * TILE, y * TILE + 26, TILE, 6);
-      }
+      fc.putImageData(id, 0, 0);
+      ctx.imageSmoothingEnabled = true; ctx.drawImage(this.fogCv, fx0 * TILE, fy0 * TILE, fw * TILE, fw * TILE); ctx.imageSmoothingEnabled = false;
     }
     // effects aging
     for (const f of this.effects) f.t++;
@@ -261,26 +234,49 @@ export class Renderer {
     this.drawHUD(ui);
   }
 
+  // 8-way facing, tracked on the render side only (0 = towards the viewer, clockwise)
+  dirOf(e) {
+    const g = this.g; let dx = 0, dy = 0;
+    if (e.mp > 0) { dx = e.x - e.px; dy = e.y - e.py; }
+    else {
+      const o = e.order; let t = null;
+      if (o && (o.type === 'attack' || o.type === 'resume') && o.target && (e.anim > 0 || !e.path)) t = g.get(o.target);
+      if (t) { dx = t.x + (t.size - 1) / 2 - e.x; dy = t.y + (t.size - 1) / 2 - e.y; }
+      else if (o && o.type === 'gather' && o.phase === 'chop') { dx = o.tx - e.x; dy = o.ty - e.y; }
+    }
+    if (dx || dy) e._dir = Math.round(Math.atan2(-dx, dy) / (Math.PI / 4) + 8) % 8;
+    else if (e._dir === undefined) e._dir = e.facing < 0 ? 1 : 7;
+    return e._dir;
+  }
   selBox(e, px, py) {
-    const ctx = this.ctx; const col = e.owner === this.me ? '#28f028' : e.owner < 0 ? '#f0f028' : this.ally(e.owner) ? '#28c8f0' : '#f02828';
-    ctx.strokeStyle = col; ctx.lineWidth = 1;
-    const s = e.size * TILE; ctx.strokeRect(Math.round(px) + 0.5, Math.round(py) + 0.5, s - 1, s - 1);
+    const ctx = this.ctx; const col = e.owner === this.me ? '#30ff30' : e.owner < 0 ? '#ffe838' : this.ally(e.owner) ? '#38d0ff' : '#ff3030';
+    const s = e.size * TILE, x = Math.round(px), y = Math.round(py);
+    if (e.unit) { // ring on the ground under the unit
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(x + 16, y + 25, 13, 7, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(x + 16, y + 25, 13, 7, 0, 0, Math.PI * 2); ctx.stroke();
+      return;
+    }
+    const L = Math.min(12, s / 3); ctx.fillStyle = '#000';
+    const corner = (cx, cy, sx, sy, c2, o) => { ctx.fillStyle = c2; ctx.fillRect(sx > 0 ? cx - o : cx - L + 1, cy - o * sy, L + o, 1 + o * 2); ctx.fillRect(cx - o * sx, sy > 0 ? cy - o : cy - L + 1, 1 + o * 2, L + o); };
+    for (const [c2, o] of [['#000', 1], [col, 0]]) { corner(x, y, 1, 1, c2, o); corner(x + s - 1, y, -1, 1, c2, o); corner(x, y + s - 1, 1, -1, c2, o); corner(x + s - 1, y + s - 1, -1, -1, c2, o); }
   }
   hpBar(e, px, py) {
-    const ctx = this.ctx, s = e.size * TILE, w = s - 4, f = Math.max(0, e.hp / e.maxHp);
-    ctx.fillStyle = '#000'; ctx.fillRect(px + 2, py + s - 3, w, 3);
-    ctx.fillStyle = f > 0.5 ? '#2c2' : f > 0.25 ? '#dd2' : '#d22'; ctx.fillRect(px + 2, py + s - 2, Math.max(1, Math.round(w * f)), 1);
+    const ctx = this.ctx, s = e.size * TILE, w = e.unit ? 24 : s - 8, f = Math.max(0, e.hp / e.maxHp), x = Math.round(px) + (s - w) / 2, y = Math.round(py) + (e.unit ? -8 : s + 2);
+    ctx.fillStyle = '#000'; ctx.fillRect(x - 1, y - 1, w + 2, 5);
+    ctx.fillStyle = '#3a1410'; ctx.fillRect(x, y, w, 3);
+    const hi = f > 0.5 ? '#58e838' : f > 0.25 ? '#f0d820' : '#f03820', lo = f > 0.5 ? '#1c8a18' : f > 0.25 ? '#a07808' : '#981008';
+    const fw = Math.max(1, Math.round(w * f)); ctx.fillStyle = lo; ctx.fillRect(x, y, fw, 3); ctx.fillStyle = hi; ctx.fillRect(x, y, fw, 1);
   }
   rallyFlag(x, y) {
     const ctx = this.ctx; ctx.save(); ctx.translate(VIEW.x - this.cam.x, VIEW.y - this.cam.y);
-    ctx.fillStyle = '#542'; ctx.fillRect(x + 14, y + 6, 2, 22); ctx.fillStyle = teamCSS(this.g.players[this.me].color); ctx.fillRect(x + 16, y + 6, 9, 6);
+    ctx.fillStyle = '#000'; ctx.fillRect(x + 13, y + 3, 4, 26); ctx.fillRect(x + 16, y + 3, 12, 9); ctx.fillStyle = '#b98538'; ctx.fillRect(x + 14, y + 4, 2, 24); ctx.fillStyle = '#4a2812'; ctx.fillRect(x + 15, y + 4, 1, 24); ctx.fillStyle = teamCSS(this.g.players[this.me].color); ctx.fillRect(x + 16, y + 4, 11, 7); ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(x + 16, y + 8, 11, 3);
     ctx.restore();
   }
   ghost(ui) {
     const ctx = this.ctx, g = this.g, d = BUILDINGS[ui.buildType], s = d.size;
     const [tx, ty] = ui.placeAt;
     const P = g.players[this.me];
-    ctx.globalAlpha = 0.6; ctx.drawImage(S.buildingSprite(ui.buildType, P.faction, P.color, 2), tx * TILE, ty * TILE - 16); ctx.globalAlpha = 1;
+    ctx.globalAlpha = 0.6; ctx.drawImage(S.buildingSprite(ui.buildType, P.faction, P.color, 2), tx * TILE - BO.x, ty * TILE - BO.y); ctx.globalAlpha = 1;
     for (let y = ty; y < ty + s; y++) for (let x = tx; x < tx + s; x++) {
       let ok = g.passable(x, y) && this.explored[y * g.w + x];
       const o = g.inMap(x, y) ? g.uocc[y * g.w + x] : 0; if (o && !ui.selection.includes(o)) ok = false;
@@ -290,9 +286,9 @@ export class Renderer {
   }
 
   // ------------------------------------------------------------ HUD
-  text(s, x, y, col = '#f0d878', size = 10, align = 'left', bold = true) {
-    const ctx = this.ctx; ctx.font = `${bold ? 'bold ' : ''}${size}px "Trebuchet MS", Verdana, sans-serif`; ctx.textAlign = align; ctx.textBaseline = 'top';
-    ctx.fillStyle = '#000'; ctx.fillText(s, x + 1, y + 1); ctx.fillStyle = col; ctx.fillText(s, x, y);
+  text(s, x, y, col = '#f0d878', size = 10, align = 'left', bold = true, serif = false) {
+    const ctx = this.ctx; ctx.font = `${bold ? 'bold ' : ''}${size}px ${serif ? 'Georgia, "Times New Roman", serif' : '"Trebuchet MS", Verdana, sans-serif'}`; ctx.textAlign = align; ctx.textBaseline = 'top';
+    ctx.fillStyle = '#000'; ctx.fillText(s, x + 1, y + 1); ctx.fillText(s, x - 1, y); ctx.fillText(s, x, y - 1); ctx.fillStyle = col; ctx.fillText(s, x, y);
   }
   bevel(x, y, w, h, inset) {
     const ctx = this.ctx; ctx.fillStyle = inset ? '#1a1410' : '#b8a488'; ctx.fillRect(x, y, w, 1); ctx.fillRect(x, y, 1, h);
@@ -304,8 +300,8 @@ export class Renderer {
     if (this.miniVer !== g.terrainVersion) {
       this.miniVer = g.terrainVersion;
       const id = mc.createImageData(g.w, g.h);
-      const col = { [T_GRASS]: [62, 110, 30], [T_DIRT]: [120, 90, 50], [T_STUMP]: [70, 110, 36], [T_FOREST]: [14, 52, 20], [T_WATER]: [24, 60, 130], [T_ROCK]: [110, 98, 88] };
-      for (let i = 0; i < g.w * g.h; i++) { const q = col[g.terrain[i]]; id.data[i * 4] = q[0]; id.data[i * 4 + 1] = q[1]; id.data[i * 4 + 2] = q[2]; id.data[i * 4 + 3] = 255; }
+      const col = MINI_COL;
+      for (let i = 0; i < g.w * g.h; i++) { const q = col[g.terrain[i]], k = 0.88 + (h2(i % g.w, (i / g.w) | 0) % 100) / 400; id.data[i * 4] = q[0] * k; id.data[i * 4 + 1] = q[1] * k; id.data[i * 4 + 2] = q[2] * k; id.data[i * 4 + 3] = 255; }
       const tmp = document.createElement('canvas'); tmp.width = g.w; tmp.height = g.h; tmp.getContext('2d').putImageData(id, 0, 0);
       this.miniBase = tmp;
     }
@@ -329,51 +325,66 @@ export class Renderer {
     mc.strokeRect(this.cam.x / TILE * sc + 0.5, this.cam.y / TILE * sc + 0.5, VIEW.w / TILE * sc, VIEW.h / TILE * sc);
     if (ui.ping && ui.ping.t > 0) { ui.ping.t--; mc.strokeStyle = ui.ping.t % 10 < 5 ? '#f22' : '#ff2'; mc.strokeRect(ui.ping.x * sc - 4, ui.ping.y * sc - 4, 8, 8); }
     ctx.drawImage(this.mini, MINI.x, MINI.y);
-    this.bevel(MINI.x - 2, MINI.y - 2, MINI.s + 4, MINI.s + 4, true);
+    S.frame(ctx, MINI.x, MINI.y, MINI.s, MINI.s, 'gold');
+  }
+
+  // static interface art, composed once
+  hudBack() {
+    if (this._hud) return this._hud;
+    const cv = document.createElement('canvas'); cv.width = 640; cv.height = 480; const x = cv.getContext('2d');
+    x.drawImage(this.panel, 0, 0); x.drawImage(this.topbar, 176, 0); x.drawImage(this.topbar, 176, 464);
+    // panel edge trim along the viewport
+    x.fillStyle = '#000'; x.fillRect(175, 0, 1, 480); x.fillStyle = rgb(c('gold', 2)); x.fillRect(172, 0, 3, 480); x.fillStyle = rgb(c('gold', 5)); x.fillRect(172, 0, 1, 480); x.fillStyle = rgb(c('gold', 1)); x.fillRect(174, 0, 1, 480);
+    x.fillStyle = 'rgba(0,0,0,.45)'; x.fillRect(0, 0, 172, 2); x.fillRect(0, 478, 172, 2); x.fillRect(0, 0, 2, 480);
+    for (let y = 30; y < 480; y += 60) { x.fillStyle = '#000'; x.fillRect(171, y - 1, 5, 5); x.fillStyle = rgb(c('gold', 6)); x.fillRect(172, y, 3, 3); x.fillStyle = rgb(c('gold', 2)); x.fillRect(173, y + 1, 2, 2); }
+    // sunken wells for the info box and command buttons
+    const well = (wx, wy, w, h) => { x.fillStyle = 'rgba(8,6,10,.72)'; x.fillRect(wx, wy, w, h); };
+    well(8, 150, 160, 112); S.frame(x, 8, 150, 160, 112, 'steel');
+    for (let i = 0; i < 9; i++) { const bx = 8 + (i % 3) * 54, by = 272 + ((i / 3) | 0) * 46; well(bx, by, 50, 42); S.frame(x, bx + 2, by + 2, 46, 38, 'ui'); }
+    // menu button
+    const g = x.createLinearGradient(0, 440, 0, 458); g.addColorStop(0, rgb(c('ui', 6))); g.addColorStop(1, rgb(c('ui', 2))); x.fillStyle = g; x.fillRect(8, 440, 160, 18); S.frame(x, 8, 440, 160, 18, 'gold');
+    // viewport frame shadow
+    x.clearRect(VIEW.x, VIEW.y, VIEW.w, VIEW.h);
+    return (this._hud = cv);
   }
 
   drawHUD(ui) {
     const ctx = this.ctx, g = this.g, P = g.players[this.me];
-    ctx.drawImage(this.panel, 0, 0);
-    ctx.drawImage(this.topbar, 0, 0);
-    ctx.drawImage(this.topbar, 0, 464);
-    this.bevel(0, 0, 176, 480, false);
+    ctx.drawImage(this.hudBack(), 0, 0);
     // resources
     if (P) {
       const gx = 300;
-      this.goldIcon(gx, 3); this.text(String(P.gold), gx + 14, 2);
-      this.woodIcon(gx + 90, 3); this.text(String(P.wood), gx + 104, 2);
-      this.foodIcon(gx + 180, 3); this.text(`${P.food}/${P.foodCap}`, gx + 194, 2, P.food >= P.foodCap ? '#ff7060' : '#f0d878');
+      ctx.drawImage(S.resIcon('gold'), gx - 6, 1); this.text(String(P.gold), gx + 14, 2);
+      ctx.drawImage(S.resIcon('wood'), gx + 84, 1); this.text(String(P.wood), gx + 104, 2);
+      ctx.drawImage(S.resIcon('food'), gx + 174, 1); this.text(`${P.food}/${P.foodCap}`, gx + 194, 2, P.food >= P.foodCap ? '#ff7060' : '#f0d878');
     }
     this.text(ui.netStatus || '', 186, 2, '#c8c0a8', 9, 'left', false);
     this.drawMinimap(ui);
     // info box
     const ib = { x: 8, y: 150, w: 160, h: 112 };
-    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(ib.x, ib.y, ib.w, ib.h); this.bevel(ib.x, ib.y, ib.w, ib.h, true);
     const sel = ui.selection.map(id => g.get(id)).filter(Boolean);
     if (sel.length === 1) this.infoSingle(sel[0], ib);
     else if (sel.length > 1) {
       sel.forEach((e, i) => {
-        const x = ib.x + 4 + (i % 3) * 52, y = ib.y + 4 + ((i / 3) | 0) * 36;
+        const x = ib.x + 5 + (i % 3) * 52, y = ib.y + 5 + ((i / 3) | 0) * 36;
         const PP = g.players[e.owner];
-        ctx.drawImage(S.entIcon(e.type, PP.faction, PP.color, e.unit), 0, 0, 46, 38, x, y, 46, 30);
-        ctx.fillStyle = '#000'; ctx.fillRect(x, y + 30, 46, 3); const f = e.hp / e.maxHp; ctx.fillStyle = f > 0.5 ? '#2c2' : f > 0.25 ? '#dd2' : '#d22'; ctx.fillRect(x, y + 31, 46 * f, 1);
-        this.bevel(x, y, 46, 30, false);
+        ctx.drawImage(S.entIcon(e.type, PP.faction, PP.color, e.unit), 0, 4, 46, 30, x, y, 46, 30);
+        ctx.fillStyle = '#000'; ctx.fillRect(x, y + 30, 46, 3); const f = e.hp / e.maxHp; ctx.fillStyle = f > 0.5 ? '#3c3' : f > 0.25 ? '#dd2' : '#d22'; ctx.fillRect(x, y + 31, 46 * f, 1);
+        this.bevel(x - 1, y - 1, 48, 35, false);
       });
     }
     // buttons
     ui.buttons = this.buttonsFor(sel, ui);
     ui.buttons.forEach((b, i) => {
       const x = 8 + (i % 3) * 54, y = 272 + ((i / 3) | 0) * 46; b.rect = [x, y, 50, 42];
-      ctx.fillStyle = '#000'; ctx.fillRect(x, y, 50, 42);
-      if (b.icon) ctx.drawImage(b.icon, x + 2, y + 2);
-      if (b.disabled) { ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(x + 2, y + 2, 46, 38); }
-      this.bevel(x, y, 50, 42, ui.hoverBtn === b.id && ui.mouseDown);
-      if (ui.hoverBtn === b.id) { ctx.strokeStyle = '#f0d878'; ctx.strokeRect(x + 1.5, y + 1.5, 47, 39); }
-      if (b.hot) this.text(b.hot === 'Escape' ? 'Esc' : b.hot.toUpperCase(), x + 47, y + 29, '#fff', 9, 'right');
+      if (!b.icon) return;
+      const down = ui.hoverBtn === b.id && ui.mouseDown ? 1 : 0;
+      ctx.drawImage(b.icon, x + 2 + down, y + 2 + down);
+      if (b.disabled) { ctx.fillStyle = 'rgba(0,0,0,0.62)'; ctx.fillRect(x + 2, y + 2, 46, 38); }
+      S.frame(ctx, x + 2, y + 2, 46, 38, ui.hoverBtn === b.id && !b.disabled ? 'gold' : 'steel');
+      if (b.hot) this.text(b.hot === 'Escape' ? 'Esc' : b.hot.toUpperCase(), x + 46, y + 28, '#fff', 9, 'right');
     });
-    // menu button
-    ctx.fillStyle = '#3a2c20'; ctx.fillRect(8, 440, 160, 18); this.bevel(8, 440, 160, 18, false); this.text('Menu (F10)', 88, 443, '#f0d878', 10, 'center');
+    this.text('Menu (F10)', 88, 443, '#f0d878', 10, 'center');
     // status line
     let status = '';
     const hb = ui.buttons.find(b => b.id === ui.hoverBtn);
@@ -385,25 +396,22 @@ export class Renderer {
     // floating messages in viewport
     ui.msgs.filter(m => now - m.t < 5000).slice(-3).forEach((m, i, arr) => this.text(m.text, VIEW.x + 8, VIEW.y + VIEW.h - 18 - (arr.length - 1 - i) * 14, '#fff', 10));
     if (ui.banner) {
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(VIEW.x + 40, VIEW.y + 170, VIEW.w - 80, 60); this.bevel(VIEW.x + 40, VIEW.y + 170, VIEW.w - 80, 60, false);
-      this.text(ui.banner, VIEW.x + VIEW.w / 2, VIEW.y + 184, '#f0d878', 18, 'center');
-      if (ui.subBanner) this.text(ui.subBanner, VIEW.x + VIEW.w / 2, VIEW.y + 208, '#e0e0e0', 10, 'center', false);
+      const bx = VIEW.x + 40, by = VIEW.y + 170, bw = VIEW.w - 80;
+      ctx.drawImage(this.panel, 0, 0, Math.min(176, bw), 60, bx, by, bw, 60); ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(bx, by, bw, 60); S.frame(ctx, bx, by, bw, 60, 'gold');
+      this.text(ui.banner, VIEW.x + VIEW.w / 2, VIEW.y + 182, '#f0d878', 20, 'center', true, true);
+      if (ui.subBanner) this.text(ui.subBanner, VIEW.x + VIEW.w / 2, VIEW.y + 210, '#e0e0e0', 10, 'center', false);
     }
   }
 
-  goldIcon(x, y) { const ctx = this.ctx; ctx.fillStyle = '#7a5000'; ctx.fillRect(x, y + 3, 11, 7); ctx.fillStyle = '#f8d040'; ctx.fillRect(x + 1, y + 2, 9, 6); ctx.fillStyle = '#fff4a0'; ctx.fillRect(x + 2, y + 3, 3, 2); }
-  woodIcon(x, y) { const ctx = this.ctx; ctx.fillStyle = '#4a2a0e'; ctx.fillRect(x, y + 2, 12, 8); ctx.fillStyle = '#a06830'; ctx.fillRect(x, y + 2, 12, 3); ctx.fillRect(x, y + 6, 12, 3); ctx.fillStyle = '#e0b070'; ctx.fillRect(x + 10, y + 2, 2, 3); ctx.fillRect(x + 10, y + 6, 2, 3); }
-  foodIcon(x, y) { const ctx = this.ctx; ctx.fillStyle = '#5a3810'; ctx.fillRect(x + 1, y + 1, 9, 10); ctx.fillStyle = '#e8c860'; ctx.fillRect(x + 2, y + 2, 7, 8); ctx.fillStyle = '#8a6020'; ctx.fillRect(x + 2, y + 5, 7, 1); }
-
   infoSingle(e, ib) {
     const g = this.g, ctx = this.ctx, P = g.players[e.owner], fac = P ? P.faction : 0;
-    ctx.drawImage(S.entIcon(e.type, fac, P ? P.color : 0, e.unit), ib.x + 4, ib.y + 4); this.bevel(ib.x + 4, ib.y + 4, 46, 38, false);
-    this.text(nameOf(e.type, fac), ib.x + 56, ib.y + 6, '#f0d878', 11);
-    if (P) this.text(P.name, ib.x + 56, ib.y + 20, teamCSS(P.color), 9, 'left', false);
+    ctx.drawImage(S.entIcon(e.type, fac, P ? P.color : 0, e.unit), ib.x + 6, ib.y + 6); S.frame(ctx, ib.x + 6, ib.y + 6, 46, 38, 'gold');
+    this.text(nameOf(e.type, fac), ib.x + 60, ib.y + 6, '#f0d878', 12, 'left', true, true);
+    if (P) this.text(P.name, ib.x + 60, ib.y + 21, teamCSS(P.color), 9, 'left', false);
     const d = def(e.type);
     if (e.type === 'mine') { this.text('Gold left: ' + e.gold, ib.x + 8, ib.y + 50, '#f0d878', 10); return; }
-    ctx.fillStyle = '#000'; ctx.fillRect(ib.x + 4, ib.y + 44, 46, 4); const f = e.hp / e.maxHp; ctx.fillStyle = f > 0.5 ? '#2c2' : f > 0.25 ? '#dd2' : '#d22'; ctx.fillRect(ib.x + 4, ib.y + 45, 46 * f, 2);
-    this.text(`${Math.max(0, e.hp)}/${e.maxHp}`, ib.x + 56, ib.y + 32, '#e0e0e0', 9, 'left', false);
+    ctx.fillStyle = '#000'; ctx.fillRect(ib.x + 59, ib.y + 44, 96, 5); const f = e.hp / e.maxHp; ctx.fillStyle = f > 0.5 ? '#1c8a18' : f > 0.25 ? '#a07808' : '#981008'; ctx.fillRect(ib.x + 60, ib.y + 45, 94 * f, 3); ctx.fillStyle = f > 0.5 ? '#58e838' : f > 0.25 ? '#f0d820' : '#f03820'; ctx.fillRect(ib.x + 60, ib.y + 45, 94 * f, 1);
+    this.text(`${Math.max(0, e.hp)}/${e.maxHp}`, ib.x + 60, ib.y + 32, '#e0e0e0', 9, 'left', false);
     let y = ib.y + 54;
     const line = (s) => { this.text(s, ib.x + 8, y, '#e8dcc0', 9, 'left', false); y += 12; };
     if (e.unit) {
@@ -415,7 +423,7 @@ export class Renderer {
     } else if (e.train.length) {
       line('Training: ' + nameOf(e.train[0].type, fac));
       this.progress(ib.x + 8, ib.y + 70, e.train[0].t / UNITS[e.train[0].type].time);
-      e.train.forEach((t, i) => { ctx.drawImage(S.entIcon(t.type, fac, P.color, true), 0, 0, 46, 38, ib.x + 8 + i * 30, ib.y + 82, 28, 23); this.bevel(ib.x + 8 + i * 30, ib.y + 82, 28, 23, false); });
+      e.train.forEach((t, i) => { ctx.imageSmoothingEnabled = true; ctx.drawImage(S.entIcon(t.type, fac, P.color, true), 0, 0, 46, 38, ib.x + 8 + i * 30, ib.y + 82, 28, 23); ctx.imageSmoothingEnabled = false; this.bevel(ib.x + 8 + i * 30, ib.y + 82, 28, 23, false); });
     } else {
       line(`Armor: ${d.armor}`);
       if (d.food) line(`Provides food: ${d.food}`);
@@ -424,7 +432,7 @@ export class Renderer {
       if (e.type === 'hall' && P) { line(`Gold mined: ${P.goldMined}`); line(`Lumber cut: ${P.woodCut}`); }
     }
   }
-  progress(x, y, f) { const ctx = this.ctx; ctx.fillStyle = '#000'; ctx.fillRect(x, y, 144, 8); ctx.fillStyle = '#2a8a2a'; ctx.fillRect(x + 1, y + 1, 142 * Math.min(1, f), 6); this.bevel(x, y, 144, 8, true); }
+  progress(x, y, f) { const ctx = this.ctx; ctx.fillStyle = '#000'; ctx.fillRect(x, y, 144, 8); const w = 142 * Math.min(1, f); ctx.fillStyle = '#1c7a1c'; ctx.fillRect(x + 1, y + 1, w, 6); ctx.fillStyle = '#58d848'; ctx.fillRect(x + 1, y + 1, w, 2); this.bevel(x, y, 144, 8, true); }
 
   buttonsFor(sel, ui) {
     const g = this.g, P = g.players[this.me]; if (!P) return [];

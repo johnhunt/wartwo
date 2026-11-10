@@ -9,19 +9,21 @@
   html, body { margin: 0; height: 100%; background: #000; color: var(--gold); font-family: "Trebuchet MS", Verdana, sans-serif; overflow: hidden; }
   #wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
   canvas#screen { image-rendering: pixelated; image-rendering: crisp-edges; background: #000; cursor: none; }
-  #menu { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(20,12,6,.35) 0%, rgba(0,0,0,.85) 80%); }
+  #menu { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(20,12,6,.15) 0%, rgba(0,0,0,.72) 85%); }
   #menu.hidden, .hidden { display: none !important; }
-  .panel { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; padding: 22px 26px; background:
-      repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 18px),
-      repeating-linear-gradient(90deg, rgba(0,0,0,.12) 0 1px, transparent 1px 36px), #4a3c2e;
-    border: 4px solid #1a120a; outline: 2px solid #8a7458; box-shadow: 0 0 0 6px #2a1e14, 0 10px 40px #000; }
-  h1 { margin: 0 0 2px; text-align: center; font-size: 34px; letter-spacing: 3px; color: var(--gold); text-shadow: 2px 2px 0 #000, 0 0 12px #a06010; font-family: Georgia, "Times New Roman", serif; }
+  .panel { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; padding: 24px 28px;
+    background: linear-gradient(rgba(10,8,12,.30), rgba(10,8,12,.52)), var(--stone-img, none) 0 0 / 352px auto, #3a3028; image-rendering: pixelated;
+    border: 3px solid #96600a; outline: 2px solid #000;
+    box-shadow: inset 0 0 0 1px #000, inset 0 0 0 3px #e8b418, inset 0 0 0 4px #3c2000, inset 0 0 0 5px #000, inset 0 0 28px rgba(0,0,0,.7), 0 0 0 3px #1a120a, 0 12px 44px #000; }
+  h1 { margin: 0 0 2px; text-align: center; font-size: 44px; letter-spacing: 6px; font-family: Georgia, "Times New Roman", serif; font-weight: bold;
+    background: linear-gradient(#fffbe0 8%, #ffe050 34%, #e8a018 52%, #96600a 70%, #f0c040 92%); -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(2px 2px 0 #000) drop-shadow(-1px -1px 0 #000) drop-shadow(0 0 10px rgba(200,110,10,.55)); }
   h2 { margin: 0 0 14px; text-align: center; font-size: 15px; color: #d8c8a0; font-weight: normal; letter-spacing: 2px; font-family: Georgia, serif; }
   h3 { margin: 14px 0 8px; font-size: 15px; color: var(--gold); border-bottom: 1px solid #8a7458; padding-bottom: 3px; }
   button { display: block; width: 100%; margin: 8px 0; padding: 9px 12px; font: bold 15px "Trebuchet MS", Verdana, sans-serif; color: var(--gold); cursor: pointer;
-    background: linear-gradient(#6a5844, #3a2c20); border: 2px solid #1a120a; box-shadow: inset 1px 1px 0 #a89070, inset -1px -1px 0 #20160e; text-shadow: 1px 1px 0 #000; }
-  button:hover { background: linear-gradient(#7a6650, #4a3a2a); color: #fff4b0; }
-  button:active { box-shadow: inset -1px -1px 0 #a89070, inset 1px 1px 0 #20160e; }
+    background: linear-gradient(#6c5a48, #3a2e26 55%, #2a201a); border: 2px solid #000; box-shadow: inset 1px 1px 0 #c08a10, inset -1px -1px 0 #3c2000, inset 2px 2px 0 rgba(255,240,180,.14), 0 2px 0 rgba(0,0,0,.5); text-shadow: 1px 1px 0 #000, -1px 0 0 #000; font-family: Georgia, "Times New Roman", serif; letter-spacing: .5px; }
+  button:hover { background: linear-gradient(#84705a, #4c3c30 55%, #34281e); color: #fffbd0; box-shadow: inset 1px 1px 0 #ffe050, inset -1px -1px 0 #96600a, 0 2px 0 rgba(0,0,0,.5); }
+  button:active { box-shadow: inset -1px -1px 0 #c08a10, inset 1px 1px 0 #3c2000; transform: translateY(1px); }
   button.small { display: inline-block; width: auto; padding: 4px 10px; font-size: 13px; margin: 2px; }
   button:disabled { opacity: .5; cursor: default; }
   label { display: flex; justify-content: space-between; align-items: center; margin: 7px 0; gap: 10px; font-size: 14px; color: #e8dcc0; }
