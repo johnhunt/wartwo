@@ -1,0 +1,377 @@
+import { Game } from './sim.js';
+import { Renderer, VIEW, MINI } from './render.js';
+import { Lockstep, Lobby } from './net.js';
+import { TILE, TICK_MS, UNITS, BUILDINGS, MAX_SELECT, nameOf } from './data.js';
+import { TEAM_COLORS, teamCSS } from './palette.js';
+import * as sfx from './sfx.js';
+
+const $ = (id) => document.getElementById(id);
+const cv = $('screen');
+let game = null, R = null, LS = null, lobby = null, running = false, paused = false;
+let ui = null;
+
+// ------------------------------------------------------------------ scaling
+function fit() {
+  const s = Math.max(1, Math.min(window.innerWidth / 640, window.innerHeight / 480));
+  const k = s >= 2 ? Math.floor(s) : s; // integer scale when big enough
+  cv.style.width = (640 * k) + 'px'; cv.style.height = (480 * k) + 'px';
+}
+window.addEventListener('resize', fit); fit();
+
+// ------------------------------------------------------------------ menus
+const panels = ['p-title', 'p-sp', 'p-mp', 'p-room', 'p-help', 'p-pause'];
+function show(id) { $('menu').classList.toggle('hidden', !id); for (const p of panels) $(p).classList.toggle('hidden', p !== id); }
+const store = { get(k, d) { try { return localStorage.getItem('wartwo.' + k) ?? d; } catch { return d; } }, set(k, v) { try { localStorage.setItem('wartwo.' + k, v); } catch { /* ignore */ } } };
+const defaultName = store.get('name', 'Commander' + Math.floor(Math.random() * 900 + 100));
+$('sp-name').value = $('mp-name').value = defaultName;
+$('sp-faction').value = $('mp-faction').value = store.get('faction', '0');
+$('sp-seed').value = Math.floor(Math.random() * 99999);
+$('mp-title').value = defaultName + "'s battle";
+
+$('b-sp').onclick = () => { sfx.play('click'); show('p-sp'); };
+$('b-help').onclick = () => { sfx.play('click'); show('p-help'); };
+$('help-back').onclick = () => show(running ? 'p-pause' : 'p-title');
+$('sp-back').onclick = () => show('p-title');
+$('sp-go').onclick = () => {
+  const name = $('sp-name').value.trim() || 'Commander', faction = +$('sp-faction').value;
+  store.set('name', name); store.set('faction', faction);
+  const n = +$('sp-opp').value, players = [{ name, faction, color: 0 }];
+  for (let i = 0; i < n; i++) players.push({ name: 'Computer ' + (i + 1), faction: (faction + 1 + i) % 2 === 0 && i > 0 ? faction : 1 - faction, color: i + 1, ai: true });
+  startGame({ seed: +$('sp-seed').value || 1, size: +$('sp-size').value, players }, 0, null);
+};
+
+$('b-mp').onclick = async () => {
+  sfx.play('click'); show('p-mp');
+  if (lobby) return;
+  const name = $('mp-name').value.trim() || 'Commander';
+  lobby = new Lobby(name, renderLobby);
+  lobby.on('start', (d) => { const slot = d.players.findIndex(p => p.peer === lobby.selfId); startGame(d, slot, lobby); });
+  lobby.on('msg', (m) => { $('room-note').textContent = m; show('p-mp'); });
+  try { await lobby.connect(); $('mp-status').textContent = 'connected — looking for games'; }
+  catch (e) { console.error(e); $('mp-status').textContent = 'could not load networking: ' + e.message; lobby = null; }
+  renderLobby();
+};
+$('mp-name').onchange = () => { if (lobby) { lobby.name = $('mp-name').value.trim() || 'Commander'; lobby.sayHello(); } store.set('name', $('mp-name').value); };
+$('mp-back').onclick = () => { if (lobby) { lobby.leaveGame(); } show('p-title'); };
+$('mp-host').onclick = () => {
+  if (!lobby || !lobby.a) return;
+  lobby.name = $('mp-name').value.trim() || 'Commander';
+  lobby.host($('mp-title').value.trim() || 'Battle', +$('mp-faction').value, +$('mp-max').value, +$('mp-size').value);
+  show('p-room');
+};
+$('room-ai0').onclick = () => lobby && lobby.addAI(0);
+$('room-ai1').onclick = () => lobby && lobby.addAI(1);
+$('room-leave').onclick = () => { lobby && lobby.leaveGame(); show('p-mp'); };
+$('room-start').onclick = () => {
+  if (!lobby || !lobby.hosting) return;
+  const d = lobby.start(Math.floor(Math.random() * 1e9));
+  startGame(d, 0, lobby);
+};
+
+function esc(s) { return String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])); }
+function renderLobby() {
+  if (!lobby) return;
+  const games = lobby.openGames();
+  const gl = $('mp-games');
+  gl.innerHTML = games.length ? '' : `<div class="muted" style="padding:8px">No open games yet. Host one, or wait for others… (${lobby.peers.size} players online)</div>`;
+  for (const g of games) {
+    const el = document.createElement('div'); el.className = 'item';
+    el.innerHTML = `<span><b>${esc(g.title)}</b><br><span class="muted">${esc(g.players.join(', '))} · ${g.players.length}/${g.max} · ${g.size}×${g.size}</span></span>`;
+    const b = document.createElement('button'); b.className = 'small'; b.textContent = 'Join';
+    b.disabled = g.players.length >= g.max;
+    b.onclick = () => { lobby.name = $('mp-name').value.trim() || 'Commander'; lobby.join(g.id, +$('mp-faction').value); show('p-room'); };
+    el.appendChild(b); gl.appendChild(el);
+  }
+  // room
+  const r = lobby.roster; const isHost = !!lobby.hosting;
+  $('room-title').textContent = r ? r.title : 'Joining…';
+  $('room-host-tools').classList.toggle('hidden', !isHost);
+  $('room-start').classList.toggle('hidden', !isHost);
+  $('room-note').textContent = isHost ? (r && r.slots.length < 2 ? 'Waiting for players… (add a computer player or wait for someone to join)' : 'Ready when you are.') : (r ? 'Waiting for the host to start…' : 'Contacting host…');
+  $('room-start').disabled = !r || r.slots.length < 2;
+  const sl = $('room-slots'); sl.innerHTML = '';
+  if (r) r.slots.forEach((s, i) => {
+    const el = document.createElement('div'); el.className = 'item';
+    el.innerHTML = `<span><span class="swatch" style="background:${TEAM_COLORS[i][1]}"></span>${esc(s.name)} <span class="muted">${s.faction ? 'Ashen Warband' : 'Kingdom of Vale'}${s.ai ? ' · computer' : ''}${i === 0 ? ' · host' : ''}</span></span>`;
+    if (isHost && i > 0) { const b = document.createElement('button'); b.className = 'small'; b.textContent = 'Remove'; b.onclick = () => lobby.removeSlot(i); el.appendChild(b); }
+    sl.appendChild(el);
+  });
+}
+
+// pause menu
+$('pz-resume').onclick = () => { show(null); if (!LS || !LS.online) paused = false; };
+$('pz-sound').onclick = () => { sfx.setMuted(!sfx.muted); $('pz-sound').textContent = 'Sound: ' + (sfx.muted ? 'Off' : 'On'); };
+$('pz-quit').onclick = () => {
+  if (LS && game && !game.over) LS.issue({ t: 'resign' });
+  setTimeout(() => { running = false; if (lobby) { lobby.close(); lobby = null; } show('p-title'); }, 400);
+  show(null); paused = false;
+};
+
+// ------------------------------------------------------------------ game start
+function startGame(opts, mySlot, lob) {
+  game = new Game(opts);
+  R = new Renderer(cv, game, mySlot);
+  LS = new Lockstep(game, opts.players, mySlot, lob);
+  if (lob) lob.on('chat', (d, peer) => { const s = opts.players.findIndex(p => p.peer === peer); addMsg((s >= 0 ? opts.players[s].name : '?') + ': ' + String(d.text).slice(0, 80)); sfx.play('click'); });
+  ui = {
+    selection: [], mode: null, menu: null, msgs: [], mouse: { x: 320, y: 240, inView: false }, drag: null, buttons: [], hoverBtn: null,
+    groups: {}, marker: null, ping: null, lastAlert: null, players: opts.players, lastGroup: null, lastGroupT: 0,
+  };
+  running = true; paused = false; show(null);
+  window.__wartwo = { game, R, LS, ui };
+  addMsg('Gather gold and lumber, build farms and raise an army!');
+  sfx.play('ready');
+  last = performance.now(); acc = 0;
+}
+function addMsg(text) { ui.msgs.push({ text, t: performance.now() }); if (ui.msgs.length > 20) ui.msgs.shift(); }
+
+// ------------------------------------------------------------------ loop
+let last = performance.now(), acc = 0, alertT = 0;
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (!running) { drawTitleBackdrop(now); return; }
+  advance(now);
+  scroll();
+  updateHover();
+  ui.netStatus = LS.online ? (LS.desync ? 'DESYNC!' : LS.waiting ? 'Waiting for players…' : '') : (paused ? 'PAUSED' : '');
+  ui.selection = ui.selection.filter(id => { const e = game.get(id); return e && !e.hidden; });
+  if (ui.mode === 'place') ui.placeAt = placeTile();
+  R.draw(Math.min(1, acc / TICK_MS), ui);
+  drawCursor();
+}
+function advance(now) {
+  let dt = now - last; last = now; if (dt > 500) dt = 500;
+  if (paused && !LS.online) return;
+  acc += dt;
+  let n = 0;
+  while (acc >= TICK_MS && n++ < 12) {
+    if (!LS.ready()) { acc = Math.min(acc, TICK_MS); break; }
+    LS.step(); acc -= TICK_MS; drainEvents();
+  }
+}
+// keep the lockstep alive when the tab is in the background (rAF stops there)
+setInterval(() => { if (running && document.hidden) advance(performance.now()); }, 200);
+
+function onScreen(x, y) { return x * TILE >= R.cam.x - 64 && x * TILE <= R.cam.x + VIEW.w + 64 && y * TILE >= R.cam.y - 64 && y * TILE <= R.cam.y + VIEW.h + 64; }
+function drainEvents() {
+  const me = LS.mySlot;
+  for (const ev of game.events) {
+    R.onEvent(ev);
+    switch (ev.t) {
+      case 'msg': if (ev.p === me || ev.p === -1) { addMsg(ev.text); if (ev.p === me) sfx.play('error'); } break;
+      case 'sfx': if (onScreen(ev.x, ev.y) && R.visible[ev.y * game.w + ev.x]) sfx.play(ev.s); break;
+      case 'boom': if (onScreen(ev.x, ev.y)) sfx.play('boom'); break;
+      case 'die': if (onScreen(ev.x, ev.y) && (R.visible[ev.y * game.w + ev.x] || ev.owner === me)) sfx.play(ev.unit ? 'die' : 'collapse'); break;
+      case 'built': if (ev.p === me) { addMsg(nameOf(ev.type, game.players[me].faction) + ' complete.'); sfx.play('done'); } break;
+      case 'trained': if (ev.p === me) { sfx.play('ready'); } break;
+      case 'deposit': if (ev.p === me) sfx.play('deposit'); break;
+      case 'attacked':
+        if (ev.p === me && performance.now() - alertT > 8000 && !onScreen(ev.x, ev.y)) { alertT = performance.now(); addMsg('We are under attack!'); sfx.play('alert'); ui.ping = { x: ev.x, y: ev.y, t: 90 }; ui.lastAlert = { x: ev.x, y: ev.y }; }
+        break;
+      case 'defeat': if (ev.p === me) { ui.banner = 'Defeat'; ui.subBanner = 'Your forces have been destroyed. Press F10 to leave.'; R.revealAll = true; } else addMsg(game.players[ev.p].name + ' has been defeated!'); break;
+      case 'over': {
+        const won = me >= 0 && game.players[me].team === ev.team;
+        ui.banner = won ? 'Victory!' : 'Defeat'; ui.subBanner = won ? 'The land is yours. Press F10 to leave.' : 'Press F10 to leave.';
+        sfx.play(won ? 'done' : 'die'); R.revealAll = true; break;
+      }
+    }
+  }
+  game.events.length = 0;
+}
+
+// ------------------------------------------------------------------ input
+function canvasPos(e) { const r = cv.getBoundingClientRect(); return [Math.floor((e.clientX - r.left) * 640 / r.width), Math.floor((e.clientY - r.top) * 480 / r.height)]; }
+function inView(x, y) { return x >= VIEW.x && y >= VIEW.y && x < VIEW.x + VIEW.w && y < VIEW.y + VIEW.h; }
+function inMini(x, y) { return x >= MINI.x && y >= MINI.y && x < MINI.x + MINI.s && y < MINI.y + MINI.s; }
+function miniToTile(x, y) { return [Math.floor((x - MINI.x) / MINI.s * game.w), Math.floor((y - MINI.y) / MINI.s * game.h)]; }
+function btnAt(x, y) { return ui.buttons.find(b => b.rect && b.act && x >= b.rect[0] && y >= b.rect[1] && x < b.rect[0] + b.rect[2] && y < b.rect[1] + b.rect[3]); }
+function placeTile() {
+  const [wx, wy] = R.screenToWorld(ui.mouse.x, ui.mouse.y); const s = BUILDINGS[ui.buildType].size;
+  return [Math.floor(wx / TILE - s / 2 + 0.5), Math.floor(wy / TILE - s / 2 + 0.5)];
+}
+function mySel() { return ui.selection.map(id => game.get(id)).filter(e => e && e.owner === LS.mySlot); }
+function issue(cmd, ack = true) { LS.issue(cmd); if (ack) sfx.play('ack'); }
+
+let lastClick = 0;
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('mousedown', e => {
+  if (!running) return;
+  const [x, y] = canvasPos(e); ui.mouse.x = x; ui.mouse.y = y; ui.mouseDown = true;
+  if (e.button === 2) { rightClick(x, y); return; }
+  if (e.button !== 0) return;
+  if (x >= 8 && x < 168 && y >= 440 && y < 458) { openMenu(); return; }
+  const b = btnAt(x, y); if (b) { pressButton(b); return; }
+  if (inMini(x, y)) {
+    if (ui.mode === 'target') { const [tx, ty] = miniToTile(x, y); targetAt(tx, ty, null, e.shiftKey); return; }
+    ui.miniDrag = true; const [tx, ty] = miniToTile(x, y); R.centerOn(tx * TILE, ty * TILE); return;
+  }
+  if (!inView(x, y)) return;
+  if (ui.mode === 'place') {
+    const [tx, ty] = ui.placeAt; const w = mySel().find(u => u.unit && UNITS[u.type].worker);
+    if (w) { issue({ t: 'build', ids: [w.id], btype: ui.buildType, x: tx, y: ty }); if (!e.shiftKey) { ui.mode = null; ui.menu = null; } }
+    return;
+  }
+  if (ui.mode === 'target') {
+    const [wx, wy] = R.screenToWorld(x, y); const t = R.entityAt(wx, wy);
+    targetAt(Math.floor(wx / TILE), Math.floor(wy / TILE), t, e.shiftKey); return;
+  }
+  ui.drag = { x0: x, y0: y, x1: x, y1: y, active: false, shift: e.shiftKey, ctrl: e.ctrlKey };
+});
+window.addEventListener('mousemove', e => {
+  if (!running) return;
+  const [x, y] = canvasPos(e); ui.mouse.x = x; ui.mouse.y = y; ui.mouse.inView = inView(x, y);
+  if (ui.miniDrag) { const [tx, ty] = miniToTile(Math.max(MINI.x, Math.min(MINI.x + MINI.s - 1, x)), Math.max(MINI.y, Math.min(MINI.y + MINI.s - 1, y))); R.centerOn(tx * TILE, ty * TILE); }
+  if (ui.drag) { ui.drag.x1 = Math.max(VIEW.x, Math.min(VIEW.x + VIEW.w - 1, x)); ui.drag.y1 = Math.max(VIEW.y, Math.min(VIEW.y + VIEW.h - 1, y)); if (Math.abs(ui.drag.x1 - ui.drag.x0) + Math.abs(ui.drag.y1 - ui.drag.y0) > 5) ui.drag.active = true; }
+});
+window.addEventListener('mouseup', e => {
+  if (!running) return;
+  ui.mouseDown = false; ui.miniDrag = false;
+  if (e.button !== 0 || !ui.drag) return;
+  const d = ui.drag; ui.drag = null;
+  if (d.active) boxSelect(d);
+  else clickSelect(d.x0, d.y0, d.shift, performance.now() - lastClick < 350 || d.ctrl);
+  lastClick = performance.now();
+});
+
+function boxSelect(d) {
+  const [ax, ay] = R.screenToWorld(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1));
+  const [bx, by] = R.screenToWorld(Math.max(d.x0, d.x1), Math.max(d.y0, d.y1));
+  const hits = game.ents.filter(e => !e.dead && !e.hidden && e.unit && e.owner === LS.mySlot && (e._px ?? 0) + 24 >= ax && (e._px ?? 0) + 8 <= bx && (e._py ?? 0) + 24 >= ay && (e._py ?? 0) + 8 <= by);
+  let sel = d.shift ? mySel().filter(e => e.unit) : [];
+  for (const h of hits) if (!sel.includes(h)) sel.push(h);
+  if (!sel.length) return;
+  ui.selection = sel.slice(0, MAX_SELECT).map(e => e.id); ui.menu = null; sfx.play('select');
+}
+function clickSelect(x, y, shift, all) {
+  const [wx, wy] = R.screenToWorld(x, y); const t = R.entityAt(wx, wy);
+  if (!t) { if (!shift) { ui.selection = []; ui.menu = null; } return; }
+  if (all && t.owner === LS.mySlot && t.unit) {
+    const vis = game.ents.filter(e => !e.dead && !e.hidden && e.owner === LS.mySlot && e.type === t.type && e._px >= R.cam.x - 16 && e._px <= R.cam.x + VIEW.w && e._py >= R.cam.y - 16 && e._py <= R.cam.y + VIEW.h);
+    ui.selection = vis.slice(0, MAX_SELECT).map(e => e.id);
+  } else if (shift && t.owner === LS.mySlot && t.unit && mySel().every(e => e.unit)) {
+    if (ui.selection.includes(t.id)) ui.selection = ui.selection.filter(i => i !== t.id);
+    else if (ui.selection.length < MAX_SELECT) ui.selection.push(t.id);
+  } else ui.selection = [t.id];
+  ui.menu = null; sfx.play('select');
+}
+
+function rightClick(x, y) {
+  if (ui.mode) { ui.mode = null; if (ui.menu && ui.menu !== 'build' && ui.menu !== 'build2') ui.menu = null; return; }
+  let tx, ty, t = null;
+  if (inMini(x, y)) [tx, ty] = miniToTile(x, y);
+  else if (inView(x, y)) { const [wx, wy] = R.screenToWorld(x, y); t = R.entityAt(wx, wy); tx = Math.floor(wx / TILE); ty = Math.floor(wy / TILE); }
+  else return;
+  const sel = mySel(); if (!sel.length) return;
+  issue({ t: 'smart', ids: sel.map(e => e.id), x: tx, y: ty, target: t ? t.id : 0 });
+  const enemy = t && t.owner >= 0 && t.owner !== LS.mySlot;
+  ui.marker = { x: tx * TILE + 16, y: ty * TILE + 16, t: 16, color: enemy ? '#f33' : '#3f3' };
+}
+
+function targetAt(tx, ty, t, shift) {
+  const sel = mySel(); const ids = sel.map(e => e.id);
+  const kind = ui.targetKind;
+  if (kind === 'move') issue({ t: 'move', ids, x: tx, y: ty });
+  else if (kind === 'attack') { if (t && t.owner !== LS.mySlot && t.type !== 'mine') issue({ t: 'attack', ids, target: t.id }); else issue({ t: 'amove', ids, x: tx, y: ty }); }
+  else if (kind === 'gather') { if (t && t.type === 'mine') issue({ t: 'gather', ids, target: t.id }); else if (game.isTree(tx, ty)) issue({ t: 'gather', ids, x: tx, y: ty }); else { sfx.play('error'); addMsg('Choose a gold mine or a tree.'); return; } }
+  ui.marker = { x: tx * TILE + 16, y: ty * TILE + 16, t: 16, color: kind === 'attack' ? '#f33' : '#3f3' };
+  if (!shift) ui.mode = null;
+}
+
+function pressButton(b) {
+  if (b.disabled) { addMsg(b.cost || 'Not available'); sfx.play('error'); return; }
+  sfx.play('click');
+  const a = b.act; const ids = mySel().map(e => e.id);
+  if (a.k === 'cmd') { issue({ t: a.t, ids }, false); ui.mode = null; }
+  else if (a.k === 'target') { ui.mode = 'target'; ui.targetKind = a.t; ui.targetLabel = b.label; }
+  else if (a.k === 'menu') { ui.menu = a.menu; ui.mode = null; }
+  else if (a.k === 'place') { ui.mode = 'place'; ui.buildType = a.btype; }
+  else if (a.k === 'train') issue({ t: 'train', ids, utype: a.utype }, false);
+}
+
+function updateHover() {
+  const b = btnAt(ui.mouse.x, ui.mouse.y); ui.hoverBtn = b ? b.id : null;
+}
+
+const keys = new Set();
+window.addEventListener('keydown', e => {
+  if (!running) return;
+  const chat = $('chat');
+  if (document.activeElement === chat) {
+    if (e.key === 'Enter') { const t = chat.value.trim(); if (t) { addMsg(game.players[LS.mySlot].name + ': ' + t); if (LS.online) lobby.send('chat', { text: t }, LS.peers()); } chat.value = ''; chat.classList.add('hidden'); chat.blur(); }
+    else if (e.key === 'Escape') { chat.value = ''; chat.classList.add('hidden'); chat.blur(); }
+    return;
+  }
+  if (!$('menu').classList.contains('hidden')) { if (e.key === 'Escape' || e.key === 'F10') { e.preventDefault(); $('pz-resume').onclick(); } return; }
+  keys.add(e.key);
+  if (e.key === 'F10') { e.preventDefault(); openMenu(); return; }
+  if (e.key === 'Enter') { chat.classList.remove('hidden'); chat.focus(); e.preventDefault(); return; }
+  if (e.key === 'Escape') {
+    if (ui.mode) { ui.mode = null; return; }
+    if (ui.menu) { ui.menu = null; return; }
+    const c = ui.buttons.find(b => b.hot === 'Escape' && b.act); if (c) pressButton(c);
+    return;
+  }
+  if (e.key === ' ') { if (ui.lastAlert) R.centerOn(ui.lastAlert.x * TILE, ui.lastAlert.y * TILE); e.preventDefault(); return; }
+  if ((e.key === 'p' || e.key === 'P') && !LS.online && !e.ctrlKey) { const hb = ui.buttons.find(b => b.hot === 'p'); if (!hb) { paused = !paused; return; } }
+  if (/^[1-9]$/.test(e.key)) {
+    if (e.ctrlKey || e.metaKey) { ui.groups[e.key] = mySel().map(s => s.id); addMsg('Group ' + e.key + ' assigned.'); e.preventDefault(); }
+    else if (ui.groups[e.key]) {
+      const ids = ui.groups[e.key].filter(id => game.get(id)); if (!ids.length) return;
+      if (ui.lastGroup === e.key && performance.now() - ui.lastGroupT < 500) { const f = game.get(ids[0]); R.centerOn(f.x * TILE, f.y * TILE); }
+      ui.selection = ids; ui.menu = null; ui.lastGroup = e.key; ui.lastGroupT = performance.now();
+    }
+    return;
+  }
+  const k = e.key.toLowerCase();
+  const b = ui.buttons.find(b => b.act && b.hot && b.hot.toLowerCase() === k);
+  if (b && !e.ctrlKey) { pressButton(b); e.preventDefault(); }
+});
+window.addEventListener('keyup', e => keys.delete(e.key));
+window.addEventListener('blur', () => keys.clear());
+
+function openMenu() { show('p-pause'); if (!LS.online) paused = true; }
+
+function scroll() {
+  const sp = 14; let dx = 0, dy = 0;
+  if (keys.has('ArrowLeft')) dx -= sp; if (keys.has('ArrowRight')) dx += sp; if (keys.has('ArrowUp')) dy -= sp; if (keys.has('ArrowDown')) dy += sp;
+  if (document.hasFocus() && $('menu').classList.contains('hidden') && !ui.drag) {
+    const { x, y } = ui.mouse;
+    if (x <= 2) dx -= sp; if (x >= 637) dx += sp; if (y <= 2) dy -= sp; if (y >= 477) dy += sp;
+  }
+  if (dx || dy) { R.cam.x += dx; R.cam.y += dy; R.clampCam(); }
+}
+
+// ------------------------------------------------------------------ cursor
+function drawCursor() {
+  const ctx = cv.getContext('2d'); const { x, y } = ui.mouse;
+  if (ui.mode === 'target' && inView(x, y) || ui.mode === 'target' && inMini(x, y)) {
+    ctx.strokeStyle = ui.targetKind === 'attack' ? '#ff4040' : '#f0d878'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, 6, 0, Math.PI * 2); ctx.moveTo(x - 9, y + 0.5); ctx.lineTo(x - 3, y + 0.5); ctx.moveTo(x + 4, y + 0.5); ctx.lineTo(x + 10, y + 0.5); ctx.moveTo(x + 0.5, y - 9); ctx.lineTo(x + 0.5, y - 3); ctx.moveTo(x + 0.5, y + 4); ctx.lineTo(x + 0.5, y + 10); ctx.stroke();
+    return;
+  }
+  let col = '#f0d878';
+  if (inView(x, y) && !ui.mode) { const [wx, wy] = R.screenToWorld(x, y); const t = R.entityAt(wx, wy); if (t) col = t.owner === LS.mySlot ? '#60ff60' : t.owner < 0 ? '#ffff60' : '#ff6060'; }
+  ctx.save(); ctx.translate(x, y);
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 13); ctx.lineTo(3, 10); ctx.lineTo(6, 16); ctx.lineTo(8, 15); ctx.lineTo(5, 9); ctx.lineTo(9, 9); ctx.closePath();
+  ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.restore();
+}
+
+// ------------------------------------------------------------------ title backdrop
+let backdrop = null;
+function drawTitleBackdrop(now) {
+  const ctx = cv.getContext('2d');
+  if (!backdrop) {
+    backdrop = new Game({ seed: 4242, size: 64, players: [{ name: 'a', faction: 0, color: 1, ai: true }, { name: 'b', faction: 1, color: 0, ai: true }] });
+    for (let i = 0; i < 3000; i++) { backdrop.step([]); backdrop.events.length = 0; }
+    backdrop.R = new Renderer(cv, backdrop, -1); backdrop.R.revealAll = true; backdrop.t = 0;
+  }
+  backdrop.step([]); for (const ev of backdrop.events) backdrop.R.onEvent(ev); backdrop.events.length = 0;
+  if (backdrop.over) backdrop = null;
+  else {
+    backdrop.t += 0.4; const R2 = backdrop.R;
+    R2.cam.x = 600 + Math.sin(backdrop.t / 300) * 500; R2.cam.y = 600 + Math.cos(backdrop.t / 400) * 400; R2.clampCam();
+    R2.draw(0, { selection: [], msgs: [], mouse: {}, buttons: [] });
+  }
+}
+requestAnimationFrame(loop);
