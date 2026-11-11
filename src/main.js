@@ -3,7 +3,11 @@ import { Renderer, VIEW, MINI } from './render.js';
 import { Lockstep, Lobby } from './net.js';
 import { TILE, TICK_MS, UNITS, BUILDINGS, MAX_SELECT, nameOf } from './data.js';
 import { TEAM_COLORS, teamCSS } from './palette.js';
-import * as sfx from './sfx.js';
+import * as sfx from './audio/sfx.js';
+import * as music from './audio/music.js';
+import * as speech from './audio/speech.js';
+import * as GA from './audio/game-audio.js';
+import { settings, setSetting, whenUnlocked } from './audio/core.js';
 import { cursorSprite, prewarm, warmStep, stonePanel } from './sprites.js';
 
 const $ = (id) => document.getElementById(id);
@@ -23,7 +27,7 @@ window.addEventListener('resize', fit); fit();
 try { document.documentElement.style.setProperty('--stone-img', `url(${stonePanel(176, 208, 5).toDataURL()})`); } catch { /* cosmetic only */ }
 
 // ------------------------------------------------------------------ menus
-const panels = ['p-title', 'p-sp', 'p-mp', 'p-room', 'p-help', 'p-pause'];
+const panels = ['p-title', 'p-sp', 'p-mp', 'p-room', 'p-help', 'p-pause', 'p-sound'];
 function show(id) { $('menu').classList.toggle('hidden', !id); for (const p of panels) $(p).classList.toggle('hidden', p !== id); }
 const store = { get(k, d) { try { return localStorage.getItem('wartwo.' + k) ?? d; } catch { return d; } }, set(k, v) { try { localStorage.setItem('wartwo.' + k, v); } catch { /* ignore */ } } };
 const defaultName = store.get('name', 'Commander' + Math.floor(Math.random() * 900 + 100));
@@ -36,6 +40,26 @@ $('b-sp').onclick = () => { sfx.play('click'); show('p-sp'); };
 $('b-help').onclick = () => { sfx.play('click'); show('p-help'); };
 $('help-back').onclick = () => show(running ? 'p-pause' : 'p-title');
 $('sp-back').onclick = () => show('p-title');
+
+// ------------------------------------------------------------------ sound settings
+music.playlist('menu');
+whenUnlocked(() => $('snd-hint').classList.add('hidden'));
+let soundBack = 'p-title';
+function openSound(from) {
+  soundBack = from; sfx.play('click');
+  $('snd-music').value = settings.music; $('snd-sfx').value = settings.sfx; $('snd-speech').value = settings.speech; $('snd-voice').value = settings.voiceMode;
+  $('snd-voice-note').textContent = speech.hasVoices() ? '' : 'Your browser has no built-in English voices, so units will use the retro sound-card voice.';
+  show('p-sound');
+}
+$('b-sound').onclick = () => openSound('p-title');
+$('pz-sound').onclick = () => openSound('p-pause');
+$('snd-back').onclick = () => { sfx.play('click'); show(soundBack); };
+for (const k of ['music', 'sfx', 'speech']) $('snd-' + k).oninput = (e) => { setSetting(k, +e.target.value); if (k === 'sfx') sfx.play('sword'); };
+$('snd-voice').onchange = (e) => { setSetting('voiceMode', e.target.value); speech.preview(0); };
+$('snd-test0').onclick = () => speech.unitLine(['worker', 'soldier', 'archer', 'knight', 'siege'][Math.floor(Math.random() * 5)], 0, 'select');
+$('snd-test1').onclick = () => speech.unitLine(['worker', 'soldier', 'archer', 'knight', 'siege'][Math.floor(Math.random() * 5)], 1, 'select');
+$('snd-next').onclick = () => music.skip();
+music.onTrack((t) => { $('snd-now').textContent = t; });
 $('sp-go').onclick = () => {
   const name = $('sp-name').value.trim() || 'Commander', faction = +$('sp-faction').value;
   store.set('name', name); store.set('faction', faction);
@@ -45,7 +69,7 @@ $('sp-go').onclick = () => {
 };
 
 $('b-mp').onclick = async () => {
-  sfx.play('click'); show('p-mp');
+  sfx.play('click'); show('p-mp'); music.playlist('lobby');
   if (lobby) return;
   const name = $('mp-name').value.trim() || 'Commander';
   lobby = new Lobby(name, renderLobby);
@@ -56,7 +80,7 @@ $('b-mp').onclick = async () => {
   renderLobby();
 };
 $('mp-name').onchange = () => { if (lobby) { lobby.name = $('mp-name').value.trim() || 'Commander'; lobby.sayHello(); } store.set('name', $('mp-name').value); };
-$('mp-back').onclick = () => { if (lobby) { lobby.leaveGame(); } show('p-title'); };
+$('mp-back').onclick = () => { if (lobby) { lobby.leaveGame(); } show('p-title'); music.playlist('menu'); };
 $('mp-host').onclick = () => {
   if (!lobby || !lobby.a) return;
   lobby.name = $('mp-name').value.trim() || 'Commander';
@@ -104,10 +128,9 @@ function renderLobby() {
 
 // pause menu
 $('pz-resume').onclick = () => { show(null); if (!LS || !LS.online) paused = false; };
-$('pz-sound').onclick = () => { sfx.setMuted(!sfx.muted); $('pz-sound').textContent = 'Sound: ' + (sfx.muted ? 'Off' : 'On'); };
 $('pz-quit').onclick = () => {
   if (LS && game && !game.over) LS.issue({ t: 'resign' });
-  setTimeout(() => { running = false; if (lobby) { lobby.close(); lobby = null; } show('p-title'); }, 400);
+  setTimeout(() => { running = false; GA.detach(); music.playlist('menu'); if (lobby) { lobby.close(); lobby = null; } show('p-title'); }, 400);
   show(null); paused = false;
 };
 
@@ -116,7 +139,7 @@ function startGame(opts, mySlot, lob) {
   game = new Game(opts);
   R = new Renderer(cv, game, mySlot);
   LS = new Lockstep(game, opts.players, mySlot, lob);
-  if (lob) lob.on('chat', (d, peer) => { const s = opts.players.findIndex(p => p.peer === peer); addMsg((s >= 0 ? opts.players[s].name : '?') + ': ' + String(d.text).slice(0, 80)); sfx.play('click'); });
+  if (lob) lob.on('chat', (d, peer) => { const s = opts.players.findIndex(p => p.peer === peer); addMsg((s >= 0 ? opts.players[s].name : '?') + ': ' + String(d.text).slice(0, 80)); sfx.play('menu'); });
   ui = {
     selection: [], mode: null, menu: null, msgs: [], mouse: { x: 320, y: 240, inView: false }, drag: null, buttons: [], hoverBtn: null,
     groups: {}, marker: null, ping: null, lastAlert: null, players: opts.players, lastGroup: null, lastGroupT: 0,
@@ -125,7 +148,7 @@ function startGame(opts, mySlot, lob) {
   running = true; paused = false; show(null);
   window.__wartwo = { game, R, LS, ui };
   addMsg('Gather gold and lumber, build farms and raise an army!');
-  sfx.play('ready');
+  GA.attach(game, R, mySlot, addMsg, VIEW);
   last = performance.now(); acc = 0;
 }
 function addMsg(text) { ui.msgs.push({ text, t: performance.now() }); if (ui.msgs.length > 20) ui.msgs.shift(); }
@@ -142,6 +165,7 @@ function loop(now) {
   ui.netStatus = LS.online ? (LS.desync ? 'DESYNC!' : LS.waiting ? 'Waiting for players…' : '') : (paused ? 'PAUSED' : '');
   ui.selection = ui.selection.filter(id => { const e = game.get(id); return e && !e.hidden; });
   if (ui.mode === 'place') ui.placeAt = placeTile();
+  GA.ambience(now);
   R.draw(Math.min(1, acc / TICK_MS), ui);
   drawCursor();
 }
@@ -163,22 +187,18 @@ function drainEvents() {
   const me = LS.mySlot;
   for (const ev of game.events) {
     R.onEvent(ev);
+    GA.event(ev);
     switch (ev.t) {
-      case 'msg': if (ev.p === me || ev.p === -1) { addMsg(ev.text); if (ev.p === me) sfx.play('error'); } break;
-      case 'sfx': if (onScreen(ev.x, ev.y) && R.visible[ev.y * game.w + ev.x]) sfx.play(ev.s); break;
-      case 'boom': if (onScreen(ev.x, ev.y)) sfx.play('boom'); break;
-      case 'die': if (onScreen(ev.x, ev.y) && (R.visible[ev.y * game.w + ev.x] || ev.owner === me)) sfx.play(ev.unit ? 'die' : 'collapse'); break;
-      case 'built': if (ev.p === me) { addMsg(nameOf(ev.type, game.players[me].faction) + ' complete.'); sfx.play('done'); } break;
-      case 'trained': if (ev.p === me) { sfx.play('ready'); } break;
-      case 'deposit': if (ev.p === me) sfx.play('deposit'); break;
+      case 'msg': if (ev.p === me || ev.p === -1) addMsg(ev.text); break;
+      case 'built': if (ev.p === me) addMsg(nameOf(ev.type, game.players[me].faction) + ' complete.'); break;
       case 'attacked':
-        if (ev.p === me && performance.now() - alertT > 8000 && !onScreen(ev.x, ev.y)) { alertT = performance.now(); addMsg('We are under attack!'); sfx.play('alert'); ui.ping = { x: ev.x, y: ev.y, t: 90 }; ui.lastAlert = { x: ev.x, y: ev.y }; }
+        if (ev.p === me && performance.now() - alertT > 8000 && !onScreen(ev.x, ev.y)) { alertT = performance.now(); addMsg('We are under attack! (Space to look)'); ui.ping = { x: ev.x, y: ev.y, t: 90 }; ui.lastAlert = { x: ev.x, y: ev.y }; }
         break;
       case 'defeat': if (ev.p === me) { ui.banner = 'Defeat'; ui.subBanner = 'Your forces have been destroyed. Press F10 to leave.'; R.revealAll = true; } else addMsg(game.players[ev.p].name + ' has been defeated!'); break;
       case 'over': {
         const won = me >= 0 && game.players[me].team === ev.team;
         ui.banner = won ? 'Victory!' : 'Defeat'; ui.subBanner = won ? 'The land is yours. Press F10 to leave.' : 'Press F10 to leave.';
-        sfx.play(won ? 'done' : 'die'); R.revealAll = true; break;
+        R.revealAll = true; break;
       }
     }
   }
@@ -196,7 +216,8 @@ function placeTile() {
   return [Math.floor(wx / TILE - s / 2 + 0.5), Math.floor(wy / TILE - s / 2 + 0.5)];
 }
 function mySel() { return ui.selection.map(id => game.get(id)).filter(e => e && e.owner === LS.mySlot); }
-function issue(cmd, ack = true) { LS.issue(cmd); if (ack) sfx.play('ack'); }
+// kind: speech response — 'ack' | 'attack' | 'work' | 'build' | null
+function issue(cmd, kind = 'ack') { LS.issue(cmd); if (kind) GA.ordered(mySel(), kind); }
 
 let lastClick = 0;
 cv.addEventListener('contextmenu', e => e.preventDefault());
@@ -214,7 +235,7 @@ cv.addEventListener('mousedown', e => {
   if (!inView(x, y)) return;
   if (ui.mode === 'place') {
     const [tx, ty] = ui.placeAt; const w = mySel().find(u => u.unit && UNITS[u.type].worker);
-    if (w) { issue({ t: 'build', ids: [w.id], btype: ui.buildType, x: tx, y: ty }); if (!e.shiftKey) { ui.mode = null; ui.menu = null; } }
+    if (w) { issue({ t: 'build', ids: [w.id], btype: ui.buildType, x: tx, y: ty }, 'build'); sfx.play('place'); if (!e.shiftKey) { ui.mode = null; ui.menu = null; } }
     return;
   }
   if (ui.mode === 'target') {
@@ -246,7 +267,7 @@ function boxSelect(d) {
   let sel = d.shift ? mySel().filter(e => e.unit) : [];
   for (const h of hits) if (!sel.includes(h)) sel.push(h);
   if (!sel.length) return;
-  ui.selection = sel.slice(0, MAX_SELECT).map(e => e.id); ui.menu = null; sfx.play('select');
+  ui.selection = sel.slice(0, MAX_SELECT).map(e => e.id); ui.menu = null; GA.selected(sel);
 }
 function clickSelect(x, y, shift, all) {
   const [wx, wy] = R.screenToWorld(x, y); const t = R.entityAt(wx, wy);
@@ -258,7 +279,7 @@ function clickSelect(x, y, shift, all) {
     if (ui.selection.includes(t.id)) ui.selection = ui.selection.filter(i => i !== t.id);
     else if (ui.selection.length < MAX_SELECT) ui.selection.push(t.id);
   } else ui.selection = [t.id];
-  ui.menu = null; sfx.play('select');
+  ui.menu = null; GA.selected([t]);
 }
 
 function rightClick(x, y) {
@@ -268,8 +289,9 @@ function rightClick(x, y) {
   else if (inView(x, y)) { const [wx, wy] = R.screenToWorld(x, y); t = R.entityAt(wx, wy); tx = Math.floor(wx / TILE); ty = Math.floor(wy / TILE); }
   else return;
   const sel = mySel(); if (!sel.length) return;
-  issue({ t: 'smart', ids: sel.map(e => e.id), x: tx, y: ty, target: t ? t.id : 0 });
-  const enemy = t && t.owner >= 0 && t.owner !== LS.mySlot;
+  const enemy = t && t.owner >= 0 && t.owner !== LS.mySlot && game.enemies(LS.mySlot, t.owner);
+  const harvest = (t && t.type === 'mine') || (!t && game.isTree(tx, ty));
+  issue({ t: 'smart', ids: sel.map(e => e.id), x: tx, y: ty, target: t ? t.id : 0 }, enemy ? 'attack' : harvest ? 'work' : 'ack');
   ui.marker = { x: tx * TILE + 16, y: ty * TILE + 16, t: 16, color: enemy ? '#f33' : '#3f3' };
 }
 
@@ -277,8 +299,8 @@ function targetAt(tx, ty, t, shift) {
   const sel = mySel(); const ids = sel.map(e => e.id);
   const kind = ui.targetKind;
   if (kind === 'move') issue({ t: 'move', ids, x: tx, y: ty });
-  else if (kind === 'attack') { if (t && t.owner !== LS.mySlot && t.type !== 'mine') issue({ t: 'attack', ids, target: t.id }); else issue({ t: 'amove', ids, x: tx, y: ty }); }
-  else if (kind === 'gather') { if (t && t.type === 'mine') issue({ t: 'gather', ids, target: t.id }); else if (game.isTree(tx, ty)) issue({ t: 'gather', ids, x: tx, y: ty }); else { sfx.play('error'); addMsg('Choose a gold mine or a tree.'); return; } }
+  else if (kind === 'attack') { if (t && t.owner !== LS.mySlot && t.type !== 'mine') issue({ t: 'attack', ids, target: t.id }, 'attack'); else issue({ t: 'amove', ids, x: tx, y: ty }, 'attack'); }
+  else if (kind === 'gather') { if (t && t.type === 'mine') issue({ t: 'gather', ids, target: t.id }, 'work'); else if (game.isTree(tx, ty)) issue({ t: 'gather', ids, x: tx, y: ty }, 'work'); else { sfx.play('error'); addMsg('Choose a gold mine or a tree.'); return; } }
   ui.marker = { x: tx * TILE + 16, y: ty * TILE + 16, t: 16, color: kind === 'attack' ? '#f33' : '#3f3' };
   if (!shift) ui.mode = null;
 }
@@ -287,11 +309,11 @@ function pressButton(b) {
   if (b.disabled) { addMsg(b.cost || 'Not available'); sfx.play('error'); return; }
   sfx.play('click');
   const a = b.act; const ids = mySel().map(e => e.id);
-  if (a.k === 'cmd') { issue({ t: a.t, ids }, false); ui.mode = null; }
+  if (a.k === 'cmd') { issue({ t: a.t, ids }, a.t === 'cancel' ? null : 'ack'); ui.mode = null; }
   else if (a.k === 'target') { ui.mode = 'target'; ui.targetKind = a.t; ui.targetLabel = b.label; }
   else if (a.k === 'menu') { ui.menu = a.menu; ui.mode = null; }
   else if (a.k === 'place') { ui.mode = 'place'; ui.buildType = a.btype; }
-  else if (a.k === 'train') issue({ t: 'train', ids, utype: a.utype }, false);
+  else if (a.k === 'train') issue({ t: 'train', ids, utype: a.utype }, null);
 }
 
 function updateHover() {
@@ -335,7 +357,7 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => keys.delete(e.key));
 window.addEventListener('blur', () => keys.clear());
 
-function openMenu() { show('p-pause'); if (!LS.online) paused = true; }
+function openMenu() { sfx.play('menu'); show('p-pause'); if (!LS.online) paused = true; }
 
 function scroll() {
   const sp = 14; let dx = 0, dy = 0;

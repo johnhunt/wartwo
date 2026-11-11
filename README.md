@@ -31,6 +31,23 @@ It also works as-is on GitHub Pages.
 - Terrain is painted per pixel from the tile map, so grass, dirt, beaches and water meet along ragged natural borders. Water is animated, and units walk behind trees and rocks
 - Sound effects are synthesized with WebAudio
 
+## Sound
+
+Everything is synthesized live in the browser. There are no audio files.
+
+- **Music**: a Sound Blaster–style FM synthesizer (2-operator voices with the OPL chips' waveforms and stereo seats)
+  plays an original medieval score: *The Iron Tide* (title), *Banners of Vale*, *The King's Highway* and *Siege at Dawn* (Kingdom),
+  *Ash and Bone*, *War Drums of the Wastes* and *The Burning* (Warband), the tavern jig *The Cracked Tankard* (lobby), plus victory and defeat stingers.
+  Each piece is written as melody and chord charts in `src/audio/songs.js`. An arranger adds bass, harp/lute arpeggios, pads, drones,
+  harmony, timpani and percussion, and builds the arrangement up over each pass.
+- **Effects**: about 50 sounds with random variation, panned and faded by where they happen on the map: steel clangs, axes, bows and
+  spears, catapults and explosions, screams and death cries, horses and wolves, chopping and falling trees, mining, coins, hammering,
+  collapsing buildings, burning fires, birds and crows. Each building has its own sound when you select it.
+- **Speech**: every unit type in both factions has its own voice and lines for being selected, taking orders, attacking, finishing
+  training and finishing work, plus a run of annoyed lines if you keep clicking it. A herald (Kingdom) or shaman (Warband) announces
+  attacks, missing resources and the end of the battle. It uses your browser's built-in voices. If none are installed, or you pick
+  "Retro babble", lines are spoken by a crunchy formant synthesizer and shown as subtitles.
+
 ## Multiplayer
 
 Choose **Multiplayer**, then host a game or join one from the list. Players find each other through
@@ -72,5 +89,5 @@ online games too.
 - `src/sprites.js`: sprite cache, effects, icons, portraits and interface art
 - `src/img.js`: indexed-colour image buffer
 - `src/palette.js`: 256-colour palette and team colour remapping
-- `src/sfx.js`: synthesized sound
+- `src/audio/`: FM music engine and score (`fm.js`, `music.js`, `songs.js`), sound effects (`sfx.js`), formant voice (`voice.js`), unit speech (`speech.js`), and the glue to game events (`game-audio.js`)
 - `src/main.js`: menus, input and the main loop

@@ -200,8 +200,8 @@ export class Game {
       case 'build': {
         const u = own.find(e => e.unit && UNITS[e.type].worker); if (!u) break;
         const b = BUILDINGS[cmd.btype]; if (!b || b.neutral) break;
-        if (b.req && !P.has[b.req]) { this.emit({ t: 'msg', p: cmd.p, text: 'Requires ' + b.names[P.faction].toLowerCase() }); break; }
-        if (P.gold < b.gold || P.wood < b.wood) { this.emit({ t: 'msg', p: cmd.p, text: P.gold < b.gold ? 'Not enough gold' : 'Not enough lumber' }); break; }
+        if (b.req && !P.has[b.req]) { this.emit({ t: 'msg', p: cmd.p, text: 'Requires ' + b.names[P.faction].toLowerCase(), code: 'requires' }); break; }
+        if (P.gold < b.gold || P.wood < b.wood) { this.emit({ t: 'msg', p: cmd.p, text: P.gold < b.gold ? 'Not enough gold' : 'Not enough lumber', code: P.gold < b.gold ? 'gold' : 'wood' }); break; }
         this.setOrder(u, { type: 'build', btype: cmd.btype, x: cmd.x, y: cmd.y, tries: 0 });
         break;
       }
@@ -209,10 +209,10 @@ export class Game {
         const b = own.find(e => !e.unit && e.built && BUILDINGS[e.type].trains && BUILDINGS[e.type].trains.includes(cmd.utype) && e.train.length < QUEUE_MAX && !e.upg);
         if (!b) break;
         const d = UNITS[cmd.utype];
-        if (d.req && !P.has[d.req]) { this.emit({ t: 'msg', p: cmd.p, text: 'Requires ' + BUILDINGS[d.req].names[P.faction].toLowerCase() }); break; }
-        if (P.gold < d.gold) { this.emit({ t: 'msg', p: cmd.p, text: 'Not enough gold' }); break; }
-        if (P.wood < d.wood) { this.emit({ t: 'msg', p: cmd.p, text: 'Not enough lumber' }); break; }
-        if (P.food + this.queued(cmd.p) + d.food > P.foodCap) { this.emit({ t: 'msg', p: cmd.p, text: 'Not enough food. Build more farms.' }); break; }
+        if (d.req && !P.has[d.req]) { this.emit({ t: 'msg', p: cmd.p, text: 'Requires ' + BUILDINGS[d.req].names[P.faction].toLowerCase(), code: 'requires' }); break; }
+        if (P.gold < d.gold) { this.emit({ t: 'msg', p: cmd.p, text: 'Not enough gold', code: 'gold' }); break; }
+        if (P.wood < d.wood) { this.emit({ t: 'msg', p: cmd.p, text: 'Not enough lumber', code: 'wood' }); break; }
+        if (P.food + this.queued(cmd.p) + d.food > P.foodCap) { this.emit({ t: 'msg', p: cmd.p, text: 'Not enough food. Build more farms.', code: 'food' }); break; }
         P.gold -= d.gold; P.wood -= d.wood;
         b.train.push({ type: cmd.utype, t: 0 });
         break;
@@ -326,7 +326,7 @@ export class Game {
         b.built = true; b.hp = Math.max(1, b.maxHp - b.dmgTaken);
         const w = this.get(b.builder); if (w) this.popOut(w, b);
         if (w) w.order = null;
-        this.emit({ t: 'built', p: b.owner, id: b.id, type: b.type });
+        this.emit({ t: 'built', p: b.owner, id: b.id, type: b.type, x: b.x, y: b.y, builder: w ? w.id : 0 });
         this.updatePlayers();
       }
       return;
@@ -382,10 +382,10 @@ export class Game {
       const sx = a.x + a.size / 2, sy = a.y + a.size / 2, tx = t.x + t.size / 2, ty = t.y + t.size / 2;
       const fl = Math.max(4, d * (ad.missile === 'rock' ? 4 : 2));
       this.missiles.push({ kind: ad.missile, sx, sy, tx, ty, target: t.id, tt: fl, t: 0, owner: a.owner, src: a.id, dmg: ad.dmg, pierce: ad.pierce, splash: ad.splash || 0, ax: t.x, ay: t.y });
-      this.emit({ t: 'sfx', s: ad.missile === 'rock' ? 'launch' : 'bow', x: a.x, y: a.y });
+      this.emit({ t: 'attack', type: a.type, f: a.owner >= 0 ? this.players[a.owner].faction : 0, owner: a.owner, missile: ad.missile, x: a.x, y: a.y, tx: t.x, ty: t.y, target: t.owner });
     } else {
       this.damage(t, ad.dmg, ad.pierce, a);
-      this.emit({ t: 'sfx', s: a.type === 'worker' ? 'hit' : 'sword', x: a.x, y: a.y });
+      this.emit({ t: 'attack', type: a.type, f: a.owner >= 0 ? this.players[a.owner].faction : 0, owner: a.owner, x: a.x, y: a.y, tx: t.x, ty: t.y, target: t.owner, building: !t.unit });
     }
   }
 
@@ -546,7 +546,8 @@ export class Game {
       this.popOut(u, b, dep ? dep.x + (dep.size >> 1) : undefined, dep ? dep.y + (dep.size >> 1) : undefined);
       if (u.hidden) return;
       b.gold -= take; u.carry = take; u.carryKind = 'gold'; u.order.phase = 'ret'; u.path = null;
-      if (b.gold <= 0) { this.emit({ t: 'msg', p: u.owner, text: 'A gold mine has collapsed!' }); this.kill(b, -1); }
+      this.emit({ t: 'mined', p: u.owner, x: u.x, y: u.y });
+      if (b.gold <= 0) { this.emit({ t: 'msg', p: u.owner, text: 'A gold mine has collapsed!', code: 'mine' }); this.kill(b, -1); }
       return;
     }
     if (b.built && b.type !== 'mine') { this.popOut(u, b); u.order = null; }
@@ -581,7 +582,7 @@ export class Game {
     } else {
       if (o.phase === 'go') {
         if (!this.isTree(o.tx, o.ty)) {
-          const t = this.nearestTree(o.tx, o.ty); if (!t) { u.order = null; this.emit({ t: 'msg', p: u.owner, text: 'No trees nearby' }); return; }
+          const t = this.nearestTree(o.tx, o.ty); if (!t) { u.order = null; this.emit({ t: 'msg', p: u.owner, text: 'No trees nearby', code: 'noTrees' }); return; }
           o.tx = t[0]; o.ty = t[1]; u.path = null;
         }
         const r = this.moveToward(u, o.tx, o.ty, 1, 1);
@@ -618,13 +619,13 @@ export class Game {
     const r = this.moveToward(u, o.x, o.y, s, 1);
     if (r === 'moving') return;
     if (u.mp > 0) return;
-    if (r === 'stuck') { this.emit({ t: 'msg', p: u.owner, text: "Can't reach building site" }); u.order = null; return; }
+    if (r === 'stuck') { this.emit({ t: 'msg', p: u.owner, text: "Can't reach building site", code: 'cantBuild' }); u.order = null; return; }
     if (!this.canPlace(o.btype, o.x, o.y, u.id)) {
-      if (++o.tries > 40) { this.emit({ t: 'msg', p: u.owner, text: "Can't build there" }); u.order = null; }
+      if (++o.tries > 40) { this.emit({ t: 'msg', p: u.owner, text: "Can't build there", code: 'cantBuild' }); u.order = null; }
       return;
     }
     const P = this.players[u.owner];
-    if (P.gold < b.gold || P.wood < b.wood) { this.emit({ t: 'msg', p: u.owner, text: P.gold < b.gold ? 'Not enough gold' : 'Not enough lumber' }); u.order = null; return; }
+    if (P.gold < b.gold || P.wood < b.wood) { this.emit({ t: 'msg', p: u.owner, text: P.gold < b.gold ? 'Not enough gold' : 'Not enough lumber', code: P.gold < b.gold ? 'gold' : 'wood' }); u.order = null; return; }
     P.gold -= b.gold; P.wood -= b.wood;
     const e = this.spawn(o.btype, u.owner, o.x, o.y);
     e.built = false; e.progress = 0; e.hp = (e.maxHp / 10) | 0; e.builder = u.id;
@@ -648,7 +649,7 @@ export class Game {
           this.damage(e, dd === 0 ? m.dmg : (m.dmg / 2) | 0, m.pierce, src);
         }
         this.emit({ t: 'boom', x: m.tx, y: m.ty });
-      } else if (t) this.damage(t, m.dmg, m.pierce, src);
+      } else if (t) { this.damage(t, m.dmg, m.pierce, src); this.emit({ t: 'impact', x: t.x, y: t.y, kind: m.kind }); }
     }
     this.missiles = keep;
   }
