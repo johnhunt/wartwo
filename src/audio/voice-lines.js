@@ -71,7 +71,7 @@ export const LINES = {
       annoyed: ['Why boss poke?', 'Drudge tired. Go away.', 'Poke again, Drudge bite.', 'Drudge want nap!', 'Drudge quit. No. Drudge no allowed quit.'],
     },
     soldier: {
-      select: ['Who Brute smash?', 'Brute ready!', 'What you want?', 'Speak, chief!', 'Brute listen.'],
+      select: ['Who should Brute smash?', 'Brute ready!', 'What you want?', 'Speak to Brute, chief!', 'Brute listen.'],
       ack: ['Smash later.', 'Going!', 'Hmph. Fine.', 'Brute will obey.', 'Move. Yes.'],
       attack: ['Smash them!', 'Blood and ash!', 'Crush them all!', 'Break their bones!'],
       ready: ['Brute hungry for battle!', 'Brute ready to smash!'],
