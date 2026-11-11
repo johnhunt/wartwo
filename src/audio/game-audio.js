@@ -12,6 +12,7 @@ export function attach(game, renderer, mySlot, msgFn, VIEW) {
   fac = me >= 0 ? game.players[me].faction : 0;
   sfx.setListener(() => ({ x: (R.cam.x + VIEW.w / 2) / 32, y: (R.cam.y + VIEW.h / 2) / 32, halfW: VIEW.w / 64, halfH: VIEW.h / 64 }));
   speech.preload([...new Set(game.players.map(p => p.faction))]);
+  preloadScreams();
   music.playlist(fac ? 'warband' : 'kingdom');
   setTimeout(() => speech.narrate(fac, 'welcome'), 900);
   birdT = performance.now() + 4000;
@@ -22,7 +23,16 @@ const seen = (x, y) => !R || R.revealAll || me < 0 || !!R.visible[Math.floor(y) 
 
 // ---------------------------------------------------------------- simulation events
 const MELEE = { worker: ['hit', 'club'], soldier: ['sword', 'axe'], knight: ['lance', 'bite'] };
-const DEATH = { worker: ['dieWorker', 'dieOrc'], soldier: ['dieHuman', 'dieOrc'], archer: ['dieWoman', 'dieOrcess'], knight: ['dieHuman', 'dieOrc'], siege: ['dieSiege', 'dieSiege'] };
+// recorded death screams (assets/sfx/death, see CREDITS.md): pool name -> clip count
+const SCREAMS = { human_m: 11, human_f: 5, orc_m: 13, orc_f: 5 };
+const screamPool = (type, f) => (f ? (type === 'archer' ? 'orc_f' : 'orc_m') : (type === 'archer' ? 'human_f' : 'human_m'));
+const lastScream = {};
+function scream(type, f, o) {
+  const pool = screamPool(type, f), n = SCREAMS[pool];
+  let i = Math.floor(Math.random() * n); if (n > 1 && i === lastScream[pool]) i = (i + 1) % n; lastScream[pool] = i;
+  sfx.playClip(`death/${pool}_${i}.mp3`, o);
+}
+export function preloadScreams() { const p = []; for (const k in SCREAMS) for (let i = 0; i < SCREAMS[k]; i++) p.push(`death/${k}_${i}.mp3`); sfx.preloadClips(p); }
 export function event(ev) {
   if (!G) return;
   const pos = (x, y) => ({ x: x + 0.5, y: y + 0.5 });
@@ -43,8 +53,9 @@ export function event(ev) {
       if (!seen(ev.x, ev.y) && ev.owner !== me) break;
       const o = pos(ev.x + ev.size / 2 - 0.5, ev.y + ev.size / 2 - 0.5);
       if (!ev.unit) { if (!ev.silent) sfx.play('collapse', o); break; }
-      const d = DEATH[ev.type] || DEATH.soldier; sfx.play(d[ev.faction] || d[0], o);
+      scream(ev.type, ev.faction, o);
       if (ev.type === 'knight') sfx.play(ev.faction ? 'dieWolf' : 'dieHorse', { ...o, delay: 0.15 });
+      if (ev.type === 'siege') sfx.play('dieSiege', o);
       break;
     }
     case 'tree': if (seen(ev.x, ev.y)) sfx.play('treeFall', pos(ev.x, ev.y)); break;

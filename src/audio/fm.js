@@ -7,13 +7,13 @@ import { ac, noise, setWave, mtof } from './core.js';
 // idx: modulation index; ia/id/is: index attack/decay/sustain; a/d/s/r: amplitude envelope;
 // fb: extra stacked modulator (approximates OPL feedback); vib: vibrato cents; ens: chorus pair
 export const PATCH = {
-  brass:   { cw: 0, mw: 0, cr: 1, mr: 1, idx: 3.4, ia: 0.07, id: 0.25, is: 0.65, a: 0.025, d: 0.25, s: 0.8, r: 0.12, fb: 0.9, vib: 7, vibR: 5.2, vibD: 0.25, gain: 0.30 },
+  brass:   { cw: 0, mw: 0, cr: 1, mr: 1, idx: 2.6, ia: 0.07, id: 0.25, is: 0.6, a: 0.03, d: 0.25, s: 0.8, r: 0.14, fb: 0.45, vib: 7, vibR: 5.2, vibD: 0.25, gain: 0.30 },
   horn:    { cw: 0, mw: 0, cr: 1, mr: 1, idx: 1.7, ia: 0.09, id: 0.3, is: 0.7, a: 0.05, d: 0.3, s: 0.85, r: 0.18, fb: 0.3, vib: 5, vibR: 5, vibD: 0.3, gain: 0.30 },
   strings: { cw: 0, mw: 0, cr: 1, mr: 1, idx: 1.5, ia: 0.2, id: 0.4, is: 0.85, a: 0.16, d: 0.4, s: 0.9, r: 0.35, vib: 13, vibR: 5.6, vibD: 0.15, ens: 7, gain: 0.17 },
   flute:   { cw: 0, mw: 0, cr: 1, mr: 1, idx: 0.55, ia: 0.03, id: 0.2, is: 0.6, a: 0.035, d: 0.2, s: 0.85, r: 0.08, vib: 11, vibR: 5.4, vibD: 0.2, breath: 0.05, gain: 0.30 },
   recorder:{ cw: 0, mw: 0, cr: 1, mr: 2, idx: 0.35, ia: 0.02, id: 0.1, is: 0.7, a: 0.02, d: 0.1, s: 0.9, r: 0.05, vib: 6, vibR: 5, vibD: 0.25, breath: 0.07, gain: 0.30 },
-  shawm:   { cw: 1, mw: 0, cr: 1, mr: 1, idx: 3.2, ia: 0.02, id: 0.2, is: 0.85, a: 0.02, d: 0.2, s: 0.9, r: 0.06, fb: 1.4, vib: 14, vibR: 6, vibD: 0.2, gain: 0.19 },
-  fiddle:  { cw: 1, mw: 0, cr: 1, mr: 1, idx: 2.2, ia: 0.04, id: 0.2, is: 0.8, a: 0.02, d: 0.15, s: 0.85, r: 0.07, fb: 0.5, vib: 12, vibR: 6.2, vibD: 0.12, gain: 0.20 },
+  shawm:   { cw: 1, mw: 0, cr: 1, mr: 1, idx: 2.3, ia: 0.03, id: 0.2, is: 0.8, a: 0.025, d: 0.2, s: 0.9, r: 0.08, fb: 0.7, vib: 14, vibR: 6, vibD: 0.2, gain: 0.19 },
+  fiddle:  { cw: 1, mw: 0, cr: 1, mr: 1, idx: 1.9, ia: 0.04, id: 0.2, is: 0.75, a: 0.025, d: 0.15, s: 0.85, r: 0.08, fb: 0.35, vib: 12, vibR: 6.2, vibD: 0.12, gain: 0.20 },
   harp:    { cw: 0, mw: 0, cr: 1, mr: 1, idx: 2.4, ia: 0.0, id: 0.35, is: 0.03, a: 0.002, d: 1.4, s: 0, r: 0.6, gain: 0.30 },
   lute:    { cw: 0, mw: 0, cr: 1, mr: 3, idx: 1.5, ia: 0.0, id: 0.12, is: 0.0, a: 0.002, d: 0.7, s: 0, r: 0.25, gain: 0.28 },
   harpsi:  { cw: 2, mw: 0, cr: 1, mr: 4, idx: 1.9, ia: 0.0, id: 0.2, is: 0.15, a: 0.001, d: 0.9, s: 0, r: 0.15, gain: 0.16 },
@@ -22,7 +22,7 @@ export const PATCH = {
   choir:   { cw: 0, mw: 0, cr: 1, mr: 1, idx: 0.9, ia: 0.3, id: 0.5, is: 0.8, a: 0.35, d: 0.5, s: 0.9, r: 0.6, vib: 16, vibR: 4.8, vibD: 0.3, ens: 9, gain: 0.17 },
   bass:    { cw: 0, mw: 0, cr: 1, mr: 1, idx: 2.0, ia: 0.0, id: 0.25, is: 0.45, a: 0.01, d: 0.4, s: 0.75, r: 0.1, gain: 0.36 },
   pizz:    { cw: 0, mw: 0, cr: 1, mr: 1, idx: 2.6, ia: 0.0, id: 0.15, is: 0.0, a: 0.002, d: 0.45, s: 0, r: 0.12, gain: 0.38 },
-  lowbrass:{ cw: 1, mw: 0, cr: 1, mr: 1, idx: 3.6, ia: 0.05, id: 0.25, is: 0.7, a: 0.04, d: 0.3, s: 0.8, r: 0.14, fb: 1.6, vib: 5, vibR: 5, vibD: 0.3, gain: 0.26 },
+  lowbrass:{ cw: 1, mw: 0, cr: 1, mr: 1, idx: 2.8, ia: 0.05, id: 0.25, is: 0.65, a: 0.04, d: 0.3, s: 0.8, r: 0.16, fb: 0.9, vib: 5, vibR: 5, vibD: 0.3, gain: 0.26 },
   bell:    { cw: 0, mw: 0, cr: 1, mr: 3.5, idx: 3.2, ia: 0.0, id: 1.2, is: 0.0, a: 0.001, d: 2.6, s: 0, r: 1.2, gain: 0.13 },
   timpani: { cw: 0, mw: 0, cr: 1, mr: 1.58, idx: 1.8, ia: 0.0, id: 0.25, is: 0.0, a: 0.002, d: 1.1, s: 0, r: 0.7, drop: 0.6, gain: 0.55 },
 };
@@ -44,25 +44,40 @@ export function playNote(dest, t, midi, dur, name, vel = 1, pan = 0) {
   const amp = ac.createGain(); amp.connect(out);
   env(amp.gain, t, 1, p.a, p.d, p.s, p.r, tOff);
 
-  const mod = ac.createOscillator(); setWave(mod, p.mw); mod.frequency.value = f * p.mr;
-  const modG = ac.createGain(); mod.connect(modG);
+  // Modulation depth envelope, shared by every operator pair of this note.
   const dev = p.idx * f * p.mr * (0.75 + 0.25 * vel);
-  if (p.ia > 0) { modG.gain.setValueAtTime(dev * 0.25, t); modG.gain.linearRampToValueAtTime(dev, t + p.ia); }
-  else modG.gain.setValueAtTime(dev, t);
-  modG.gain.setTargetAtTime(dev * p.is, t + p.ia, Math.max(0.01, p.id / 3));
-  const oscs = [mod];
-  if (p.fb) { const m2 = ac.createOscillator(); m2.frequency.value = f * p.mr; const g2 = ac.createGain(); g2.gain.value = p.fb * f * p.mr; m2.connect(g2); g2.connect(mod.frequency); oscs.push(m2); }
-  const carriers = [];
-  const mkCar = (cents) => {
+  const depth = ac.createGain(); depth.gain.value = 0;
+  if (p.ia > 0) { depth.gain.setValueAtTime(dev * 0.25, t); depth.gain.linearRampToValueAtTime(dev, t + p.ia); }
+  else depth.gain.setValueAtTime(dev, t);
+  depth.gain.setTargetAtTime(dev * p.is, t + p.ia, Math.max(0.01, p.id / 3));
+  // Self-modulated ("feedback") and half-sine modulators produce a DC offset, which would shift
+  // the carrier off pitch and make every partial inharmonic (a clangy, ring-modulated sound).
+  // A gentle high-pass on the modulation path removes it.
+  const dcBlock = ac.createBiquadFilter(); dcBlock.type = 'highpass'; dcBlock.frequency.value = Math.min(20, f * p.mr * 0.25); dcBlock.Q.value = 0.5;
+  dcBlock.connect(depth);
+  const oscs = [], detunable = [];
+  // Each carrier gets its own modulator with the same detune, so the frequency ratio stays exact.
+  const mkPair = (cents) => {
+    const m = ac.createOscillator(); setWave(m, p.mw); m.frequency.value = f * p.mr; m.detune.value = cents;
+    const mg = ac.createGain(); mg.gain.value = p.ens ? 0.5 : 1; m.connect(mg); mg.connect(dcBlock); // chorus pairs share the depth
+    oscs.push(m); detunable.push(m);
+    if (p.fb) {
+      const m2 = ac.createOscillator(); m2.frequency.value = f * p.mr; m2.detune.value = cents;
+      const g2 = ac.createGain(); g2.gain.value = p.fb * f * p.mr; m2.connect(g2); g2.connect(m.frequency);
+      oscs.push(m2); detunable.push(m2);
+    }
     const c = ac.createOscillator(); setWave(c, p.cw); c.frequency.value = f * p.cr; c.detune.value = cents;
     if (p.drop) { c.frequency.setValueAtTime(f * p.cr * Math.pow(2, p.drop / 12), t); c.frequency.exponentialRampToValueAtTime(f * p.cr, t + 0.12); }
-    modG.connect(c.frequency); c.connect(amp); carriers.push(c); oscs.push(c);
+    c.connect(amp); oscs.push(c); detunable.push(c);
+    return c;
   };
-  if (p.ens) { mkCar(-p.ens); mkCar(p.ens); out.gain.value *= 0.7; } else mkCar(0);
-  if (p.vib) {
+  const carriers = p.ens ? [mkPair(-p.ens), mkPair(p.ens)] : [mkPair(0)];
+  if (p.ens) out.gain.value *= 0.7;
+  for (const c of carriers) depth.connect(c.frequency);
+  if (p.vib) { // vibrato moves carriers and modulators together, keeping the spectrum harmonic
     const lfo = ac.createOscillator(); lfo.frequency.value = p.vibR;
     const lg = ac.createGain(); lg.gain.setValueAtTime(0, t); lg.gain.linearRampToValueAtTime(p.vib, t + (p.vibD || 0) + 0.15);
-    lfo.connect(lg); for (const c of carriers) lg.connect(c.detune); oscs.push(lfo);
+    lfo.connect(lg); for (const o of detunable) lg.connect(o.detune); oscs.push(lfo);
   }
   if (p.breath) {
     const n = ac.createBufferSource(); n.buffer = noise(); n.loop = true;

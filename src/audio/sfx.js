@@ -76,12 +76,7 @@ const S = {
     for (let i = 0; i < 9; i++) nz(d, t + 0.08 + Math.random() * 0.6, { f: rnd(1500, 4500), q: 3, dur: 0.03, vol: rnd(0.1, 0.25) }); // debris
   },
 
-  // deaths (formant screams)
-  dieHuman: (d, t) => { const p = rnd(260, 360); voice(d, t, { dur: rnd(0.5, 0.75), f0: [[0, p], [0.1, p * 1.15], [0.6, p * 0.55]], v: [[0, 'ae'], [0.15, 'a'], [0.6, 'uh']], size: rnd(0.98, 1.08), breath: 0.15, gain: 0.45, vib: 30, vibR: 9 }); },
-  dieWorker: (d, t) => { const p = rnd(220, 290); voice(d, t, { dur: 0.55, f0: [[0, p * 1.2], [0.5, p * 0.6]], v: [[0, 'o'], [0.4, 'uh']], size: 1.05, breath: 0.2, gain: 0.4, vib: 40, vibR: 7 }); },
-  dieWoman: (d, t) => { const p = rnd(430, 520); voice(d, t, { dur: rnd(0.55, 0.7), f0: [[0, p], [0.12, p * 1.12], [0.6, p * 0.6]], v: [[0, 'ae'], [0.15, 'a'], [0.55, 'uh']], size: 1.18, breath: 0.15, gain: 0.4, vib: 35, vibR: 9 }); },
-  dieOrcess: (d, t) => { const p = rnd(220, 270); voice(d, t, { dur: 0.7, f0: [[0, p * 1.2], [0.6, p * 0.6]], v: [[0, 'a'], [0.6, 'uh']], size: 0.95, rough: 0.6, breath: 0.25, gain: 0.45 }); },
-  dieOrc: (d, t) => { const p = rnd(120, 160); voice(d, t, { dur: rnd(0.7, 0.9), f0: [[0, p * 1.3], [0.15, p * 1.4], [0.8, p * 0.5]], v: [[0, 'o'], [0.2, 'aw'], [0.7, 'uh']], size: 0.78, rough: 1, breath: 0.25, gain: 0.55 }); },
+  // deaths: creature and machine sounds (the screams themselves are recordings, see playClip)
   dieHorse: (d, t) => { voice(d, t, { dur: 1.0, f0: [[0, 700], [0.25, 950], [0.7, 520], [1.0, 300]], v: [[0, 'i'], [0.3, 'e'], [0.8, 'a']], size: 1.4, breath: 0.35, gain: 0.35, vib: 120, vibR: 17 }); nz(d, t + 0.6, { type: 'lowpass', f: 400, dur: 0.4, vol: 0.5, buf: brown() }); },
   dieWolf: (d, t) => { voice(d, t, { dur: 0.6, f0: [[0, 800], [0.1, 1000], [0.6, 450]], v: [[0, 'i'], [0.5, 'u']], size: 1.3, breath: 0.3, gain: 0.35, vib: 60, vibR: 11 }); },
   dieSiege: (d, t) => { nz(d, t, { f: 900, q: 1.5, dur: 0.15, vol: 0.7 }); for (let i = 0; i < 6; i++) nz(d, t + 0.1 + i * rnd(0.05, 0.12), { f: rnd(300, 900), q: 3, dur: 0.08, vol: 0.35 }); tn(d, t, { f: 90, f1: 40, dur: 0.4, vol: 0.4 }); },
@@ -146,19 +141,42 @@ const lastAt = {};
 const LIMIT = { chop: 45, hammer: 60, sword: 35, axe: 35, hit: 35, bow: 40, arrowHit: 30, fire: 300, coins: 120, logs: 120 };
 
 // play(name, {x, y, vol, delay}) — x/y in tiles for positional sounds
-export function play(name, o = {}) {
-  const a = ctx(); if (!a || !S[name]) return;
-  const now = performance.now(); const lim = LIMIT[name] ?? 60;
-  if (lastAt[name] && now - lastAt[name] < lim) return; lastAt[name] = now;
+// stereo position and distance fade for a sound at tile (o.x, o.y); null = too far away to hear
+function place(o) {
   let pan = 0, vol = o.vol ?? 1;
   if (o.x !== undefined && listener) {
     const L = listener(); const dx = (o.x - L.x) / L.halfW, dy = (o.y - L.y) / L.halfH;
     const dist = Math.max(Math.abs(dx), Math.abs(dy));
-    if (dist > 2.2) return;
+    if (dist > 2.2) return null;
     pan = Math.max(-0.85, Math.min(0.85, dx * 0.7));
     vol *= dist <= 1 ? 1 : Math.max(0.15, 1 - (dist - 1) * 0.7);
   }
-  const d = chain(bus.sfx, pan, vol);
-  S[name](d, a.currentTime + 0.01 + (o.delay || 0));
+  return { pan, vol };
+}
+
+export function play(name, o = {}) {
+  const a = ctx(); if (!a || !S[name]) return;
+  const now = performance.now(); const lim = LIMIT[name] ?? 60;
+  if (lastAt[name] && now - lastAt[name] < lim) return; lastAt[name] = now;
+  const pl = place(o); if (!pl) return;
+  S[name](chain(bus.sfx, pl.pan, pl.vol), a.currentTime + 0.01 + (o.delay || 0));
+}
+
+// ---- recorded clips (death screams) ------------------------------------------------
+const BASE = new URL('../../assets/sfx/', import.meta.url);
+const clips = new Map();
+function loadClip(path) {
+  if (!clips.has(path)) clips.set(path, fetch(new URL(path, BASE)).then(r => (r.ok ? r.arrayBuffer() : Promise.reject(r.status)))
+    .then(b => new Promise((res, rej) => ctx().decodeAudioData(b, res, rej))).catch(() => null));
+  return clips.get(path);
+}
+export function preloadClips(paths) { if (ctx()) for (const p of paths) loadClip(p); }
+// play a recorded clip, positioned like play(); slight random pitch so repeats differ
+export async function playClip(path, o = {}) {
+  const a = ctx(); if (!a) return;
+  const pl = place(o); if (!pl) return;
+  const buf = await loadClip(path); if (!buf) return;
+  const src = a.createBufferSource(); src.buffer = buf; src.playbackRate.value = o.rate ?? (0.94 + Math.random() * 0.12);
+  src.connect(chain(bus.sfx, pl.pan, pl.vol)); src.start(a.currentTime + (o.delay || 0));
 }
 export const names = Object.keys(S);

@@ -48,7 +48,8 @@ Everything is synthesized live in the browser. There are no audio files.
   (Apache-2.0), with a separate voice for each unit type. Kingdom units use British voices. Warband orcs are pitched and formant-shifted
   down, layered with a sub-octave growl and given some grit, and the shaman narrator has a cave echo. Units speak when selected, given
   orders, attacking, finishing training or finishing work, and get annoyed if you keep clicking them. A herald or shaman announces
-  attacks, missing resources and the end of the battle. To change or add lines, edit `src/audio/voice-lines.js` and run
+  attacks, missing resources and the end of the battle. Death screams are real recordings from free sound packs (see
+  [CREDITS.md](CREDITS.md)). Warband screams get the same orc treatment as the voices. To change or add lines, edit `src/audio/voice-lines.js` and run
   `python tools/render-voices.py` (needs `pip install kokoro soundfile numpy` on Python 3.10–3.12, and ffmpeg built with rubberband).
 
 ## Multiplayer
