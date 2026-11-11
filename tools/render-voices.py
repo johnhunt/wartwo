@@ -60,7 +60,7 @@ def effects(c):
 def trim_norm(x):
     thr = 0.012 * np.max(np.abs(x))
     idx = np.where(np.abs(x) > thr)[0]
-    if len(idx): x = x[max(0, idx[0] - 240): idx[-1] + 2400]
+    if len(idx): x = x[max(0, idx[0] - 1100): idx[-1] + 3300]   # keep soft onsets (s, f, h) and tails
     rms = np.sqrt(np.mean(x ** 2)) + 1e-9
     x = x * (0.12 / rms)                       # common loudness
     pk = np.max(np.abs(x))
