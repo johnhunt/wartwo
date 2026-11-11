@@ -6,7 +6,7 @@ export const K = 0, W = 1; // factions: Kingdom of Vale, Ashen Warband
 export const LINES = {
   [K]: {
     worker: {
-      select: ['Aye?', 'What needs doing?', "At your service, milord.", 'Yes, master?', 'Ready for an honest day\'s toil.', 'Hmm? Oh, it\'s you.'],
+      select: ['Aye?', 'What needs doing?', "At your service, milord.", 'Yes, master?', 'Ready for an honest day\'s toil.', 'Oh! It\'s you, milord.'],
       ack: ['Right away.', 'Aye, aye, milord.', "I'll see to it.", 'As you wish.', 'Off I go, then.', 'Consider it done.'],
       work: ['Back to the grindstone.', "Another day, another copper.", 'Mind your fingers, mind your toes.', 'Hard work never hurt nobody. Much.'],
       build: ["I'll have it up in no time.", 'Hammer and nails, coming up.', 'One fine building, on its way.'],
@@ -30,18 +30,18 @@ export const LINES = {
       annoyed: ['I could shoot an apple off your head from here.', 'Careful. My aim wavers when I am vexed.', 'Find someone else to pester.', 'I am counting my arrows. One for each poke.'],
     },
     knight: {
-      select: ['My liege?', 'For honour!', 'My steed is ready.', 'Command me.', 'Your champion awaits.'],
+      select: ['Yes, my liege?', 'For honour and glory!', 'My steed is ready.', 'Command me.', 'Your champion awaits.'],
       ack: ['Onward, men!', 'As you command.', 'We ride at once!', 'With haste!', 'It shall be done.'],
-      attack: ['For the King!', 'Lances down!', 'Ride them down!', 'For glory!'],
+      attack: ['For the King!', 'Lower your lances!', 'Ride them down!', 'For glory!'],
       ready: ['Lancer, reporting for duty.', 'My lance is yours, my liege.'],
       annoyed: ['A knight does not care to be prodded.', 'My horse grows impatient with you.', 'I polished this armour for three hours.', 'Is there a dragon, or are you merely bored?'],
     },
     siege: {
-      select: ['Engine ready!', 'Loaded and waiting.', 'Point us at something big.', 'Mangonel crew here!'],
-      ack: ['Heave, lads!', 'Rolling out.', 'Mind the wheels!', 'Push, lads, push!'],
+      select: ['Engine ready!', 'Loaded and waiting.', 'Show us a wall to knock down.', 'Mangonel crew here!'],
+      ack: ['Heave ho, lads!', 'Rolling out.', 'Mind the wheels!', 'Push, lads, push!'],
       attack: ['Fire the engine!', 'Let fly!', 'Bring down the walls!', 'Stone away!'],
       ready: ['Siege engine assembled!', 'Mangonel ready to roll!'],
-      annoyed: ['Do you know how heavy this thing is?', 'One more poke, and we load you into it!', 'Careful, it bites.'],
+      annoyed: ['Do you know how heavy this thing is?', 'One more poke, and we load you into it!', 'Careful, the engine bites.'],
     },
     narrator: {
       attacked: ['We are under attack, my lord!', 'Our people are under attack!', 'The enemy is upon us!'],
@@ -61,8 +61,8 @@ export const LINES = {
   },
   [W]: {
     worker: {
-      select: ['Hmm?', 'What now?', 'Drudge here.', 'Yes, boss?', 'Ugh. More work?', 'Drudge listening.'],
-      ack: ['Fine. Drudge go.', 'Drudge go.', 'Okay, okay.', 'Yes, boss.', 'Hmph. On it.', 'If boss say so.'],
+      select: ['Huh? Who called?', 'What now?', 'Drudge here.', 'Yes, boss?', 'Ugh. More work, boss?', 'Drudge listening.'],
+      ack: ['Fine. Drudge go.', 'Drudge go.', 'Okay, okay.', 'Yes, boss.', 'Okay. Drudge on it.', 'If boss say so.'],
       work: ['Dig, dig, dig.', 'Chop, chop. Drudge hate chop.', 'Work never end.'],
       build: ['Drudge build good hut.', 'Stack wood. Bang nails.'],
       attack: ['Drudge fight? Okay.', 'Bonk them!'],
@@ -71,8 +71,8 @@ export const LINES = {
       annoyed: ['Why boss poke?', 'Drudge tired. Go away.', 'Poke again, Drudge bite.', 'Drudge want nap!', 'Drudge quit. No. Drudge no allowed quit.'],
     },
     soldier: {
-      select: ['Who to smash?', 'Brute ready!', 'What you want?', 'Speak!', 'Brute listen.'],
-      ack: ['Smash later.', 'Going!', 'Hmph. Fine.', 'Brute obey.', 'Move. Yes.'],
+      select: ['Who Brute smash?', 'Brute ready!', 'What you want?', 'Speak, chief!', 'Brute listen.'],
+      ack: ['Smash later.', 'Going!', 'Hmph. Fine.', 'Brute will obey.', 'Move. Yes.'],
       attack: ['Smash them!', 'Blood and ash!', 'Crush them all!', 'Break their bones!'],
       ready: ['Brute hungry for battle!', 'Brute ready to smash!'],
       annoyed: ['Brute not toy!', 'Stop it, or Brute smash you!', 'Argh! Brute getting angry.', 'Brute count to ten. Brute only know three.'],
@@ -80,15 +80,15 @@ export const LINES = {
     archer: {
       select: ['Spear ready.', 'We go hunt?', 'Yes, chief?', 'I see far.'],
       ack: ['Hunting.', 'Tracking.', 'Me go quick.', 'Quiet like shadow.'],
-      attack: ['Spear find heart!', 'Throw spears!', 'Pierce them!', 'Hunt them!'],
+      attack: ['Spear find heart!', 'Throw spears!', 'Pierce their hearts!', 'Hunt them!'],
       ready: ['Spears sharp!', 'Thrower ready for hunt.'],
       annoyed: ['Next spear go in you.', 'You annoying, like fly.', 'I aim for flies. You next.'],
     },
     knight: {
-      select: ['Wolf hungry.', 'Ride?', 'Teeth ready!', 'Hmm. Where to?'],
-      ack: ['Run, wolf, run!', 'Fast as fang!', 'Raaah! We go now!', 'We ride!'],
+      select: ['Wolf hungry.', 'We ride now?', 'Teeth ready!', 'Hmm. Where to?'],
+      ack: ['Run, wolf, run!', 'Fast as wolf fang!', 'Raaah! We go now!', 'We ride!'],
       attack: ['Feast, wolf!', 'Hunt them down!', 'Tear them apart!', 'Fresh meat!'],
-      ready: ['Wolf rider ready to hunt!', 'Wolf and rider, ready!'],
+      ready: ['Wolf rider ready to hunt!', 'Wolf and rider ready to ride!'],
       annoyed: ['Wolf will eat you.', 'Even wolf think you strange.', 'Wolf bite hand that poke.'],
     },
     siege: {
@@ -102,7 +102,7 @@ export const LINES = {
       attacked: ['Enemies attack us!', 'Warband is under attack!', 'They come! To arms!'],
       gold: ['Need more gold!', 'Not enough gold, chieftain.'],
       wood: ['Need more wood!', 'Not enough lumber!'],
-      food: ['Need more granaries!', 'Warband hungry. Build granary.'],
+      food: ['We need more granaries!', 'Warband hungry. Build granary.'],
       built: ['Building done.'],
       cantBuild: ['Cannot build there!'],
       requires: ['Need other building first!'],

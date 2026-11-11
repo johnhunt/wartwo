@@ -7,6 +7,7 @@ neural TTS (Apache-2.0, https://huggingface.co/hexgrad/Kokoro-82M).
 
 Each unit type gets its own voice. Warband (orc) voices are pitched and
 formant-shifted down, layered with a sub-octave growl and lightly driven.
+Settings were tuned by transcribing every clip with Whisper (tools/qa-voices.py).
 """
 import json, os, subprocess, sys, tempfile, argparse
 import numpy as np, soundfile as sf
@@ -23,12 +24,12 @@ CAST = {
     (0, 'knight'):   dict(voice='bm_fable',    speed=0.95, pitch=0.94, keep_formant=True),
     (0, 'siege'):    dict(voice='am_puck',     speed=1.1),
     (0, 'narrator'): dict(voice='bm_daniel',   speed=0.93, echo='hall'),
-    (1, 'worker'):   dict(voice='am_eric',     speed=1.0,  pitch=0.80, growl=0.15, drive=1.5),
-    (1, 'soldier'):  dict(voice='am_onyx',     speed=0.95, pitch=0.70, growl=0.32, drive=2.2),
-    (1, 'archer'):   dict(voice='bf_isabella', speed=1.0,  pitch=0.84, growl=0.12, drive=1.4),
-    (1, 'knight'):   dict(voice='am_fenrir',   speed=1.05, pitch=0.78, growl=0.2,  drive=1.8),
-    (1, 'siege'):    dict(voice='am_michael',  speed=1.0,  pitch=0.82, growl=0.18, drive=1.6),
-    (1, 'narrator'): dict(voice='am_onyx',     speed=0.88, pitch=0.66, growl=0.3,  drive=1.8, echo='cave'),
+    (1, 'worker'):   dict(voice='am_eric',     speed=1.0,  pitch=0.82, growl=0.1,  drive=1.25),
+    (1, 'soldier'):  dict(voice='am_onyx',     speed=0.95, pitch=0.76, growl=0.15, drive=1.5),
+    (1, 'archer'):   dict(voice='bf_isabella', speed=1.0,  pitch=0.86, growl=0.08, drive=1.2),
+    (1, 'knight'):   dict(voice='am_fenrir',   speed=1.0,  pitch=0.8,  growl=0.12, drive=1.35),
+    (1, 'siege'):    dict(voice='am_michael',  speed=1.0,  pitch=0.82, growl=0.12, drive=1.3),
+    (1, 'narrator'): dict(voice='am_onyx',     speed=0.9,  pitch=0.8,  growl=0.12, drive=1.3, echo='room'),
 }
 
 def ffmpeg(args):
@@ -53,7 +54,7 @@ def effects(c):
         graph += f',equalizer=f=220:t=q:w=1:g=3,volume={d},asoftclip=type=tanh,volume={1 / d ** 0.5:.3f}'
     e = c.get('echo')
     if e == 'hall': graph += ',aecho=0.85:0.5:45|90:0.22|0.12'
-    if e == 'cave': graph += ',aecho=0.8:0.6:70|160|260:0.3|0.2|0.12'
+    if e == 'room': graph += ',aecho=0.9:0.6:28:0.12'   # tiny slapback; long echoes wreck intelligibility
     graph += ',highpass=f=70,lowpass=f=10500'
     return graph + '[out]'
 
