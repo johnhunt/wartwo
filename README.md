@@ -43,10 +43,13 @@ Everything is synthesized live in the browser. There are no audio files.
 - **Effects**: about 50 sounds with random variation, panned and faded by where they happen on the map: steel clangs, axes, bows and
   spears, catapults and explosions, screams and death cries, horses and wolves, chopping and falling trees, mining, coins, hammering,
   collapsing buildings, burning fires, birds and crows. Each building has its own sound when you select it.
-- **Speech**: every unit type in both factions has its own voice and lines for being selected, taking orders, attacking, finishing
-  training and finishing work, plus a run of annoyed lines if you keep clicking it. A herald (Kingdom) or shaman (Warband) announces
-  attacks, missing resources and the end of the battle. It uses your browser's built-in voices. If none are installed, or you pick
-  "Retro babble", lines are spoken by a crunchy formant synthesizer and shown as subtitles.
+- **Speech**: like the voice recordings in classic RTS games, every line is a pre-recorded clip in `assets/voice/` (246 lines,
+  about 3 MB). They were rendered offline with the [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) neural text-to-speech model
+  (Apache-2.0), with a separate voice for each unit type. Kingdom units use British voices. Warband orcs are pitched and formant-shifted
+  down, layered with a sub-octave growl and given some grit, and the shaman narrator has a cave echo. Units speak when selected, given
+  orders, attacking, finishing training or finishing work, and get annoyed if you keep clicking them. A herald or shaman announces
+  attacks, missing resources and the end of the battle. To change or add lines, edit `src/audio/voice-lines.js` and run
+  `python tools/render-voices.py` (needs `pip install kokoro soundfile numpy` on Python 3.10–3.12, and ffmpeg built with rubberband).
 
 ## Multiplayer
 
@@ -89,5 +92,5 @@ online games too.
 - `src/sprites.js`: sprite cache, effects, icons, portraits and interface art
 - `src/img.js`: indexed-colour image buffer
 - `src/palette.js`: 256-colour palette and team colour remapping
-- `src/audio/`: FM music engine and score (`fm.js`, `music.js`, `songs.js`), sound effects (`sfx.js`), formant voice (`voice.js`), unit speech (`speech.js`), and the glue to game events (`game-audio.js`)
+- `src/audio/`: FM music engine and score (`fm.js`, `music.js`, `songs.js`), sound effects (`sfx.js`), formant voice (`voice.js`), unit speech player (`speech.js`) and its script (`voice-lines.js`), and the glue to game events (`game-audio.js`)
 - `src/main.js`: menus, input and the main loop

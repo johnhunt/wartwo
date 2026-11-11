@@ -11,7 +11,7 @@ export function attach(game, renderer, mySlot, msgFn, VIEW) {
   G = game; R = renderer; me = mySlot; addMsg = msgFn;
   fac = me >= 0 ? game.players[me].faction : 0;
   sfx.setListener(() => ({ x: (R.cam.x + VIEW.w / 2) / 32, y: (R.cam.y + VIEW.h / 2) / 32, halfW: VIEW.w / 64, halfH: VIEW.h / 64 }));
-  speech.onSubtitle((text) => addMsg('“' + text + '”'));
+  speech.preload([...new Set(game.players.map(p => p.faction))]);
   music.playlist(fac ? 'warband' : 'kingdom');
   setTimeout(() => speech.narrate(fac, 'welcome'), 900);
   birdT = performance.now() + 4000;

@@ -1,0 +1,118 @@
+// Every spoken line in the game. tools/render-voices.py reads this file (via
+// tools/export-lines.mjs) and pre-renders each line to assets/voice/ with a
+// neural TTS voice per unit; the game then just plays those recordings.
+// --------------------------------------------------------------------------- script
+export const K = 0, W = 1; // factions: Kingdom of Vale, Ashen Warband
+export const LINES = {
+  [K]: {
+    worker: {
+      select: ['Aye?', 'What needs doing?', "At your service, milord.", 'Yes, master?', 'Ready for an honest day\'s toil.', 'Hmm? Oh, it\'s you.'],
+      ack: ['Right away.', 'Aye, aye.', "I'll see to it.", 'As you wish.', 'Off I go, then.', 'Consider it done.'],
+      work: ['Back to the grindstone.', "Another day, another copper.", 'Mind your fingers, mind your toes.', 'Hard work never hurt nobody. Much.'],
+      build: ["I'll have it up in no time.", 'Hammer and nails, coming up.', 'One fine building, on its way.'],
+      attack: ['I\'m no soldier, but alright!', 'Have at ye, with my pitchfork!'],
+      ready: ['Ready to work, my lord.', 'Where do you need me?'],
+      done: ["That's that built, milord!", 'All finished!', 'Another fine job, if I say so myself.'],
+      annoyed: ["I've got work to be doing, you know.", 'Stop poking me!', 'My back is killing me as it is.', "Click me once more and I'm joining the Warband.", 'Do I look like I\'ve nothing better to do?', "I've a wife and six children, and none of them poke me this much!"],
+    },
+    soldier: {
+      select: ['Sir!', 'Awaiting orders.', 'My blade is yours.', 'Ready, sir!', 'Steel and courage, sir.'],
+      ack: ['At once!', 'Forward!', 'By your command.', 'Moving out!', 'Understood, sir!'],
+      attack: ['For Vale!', 'Have at them!', 'To arms!', 'Charge!', 'No quarter!'],
+      ready: ['Sword and shield, ready!', 'Reporting for duty, sir!'],
+      annoyed: ['This armour chafes, you know.', 'I only joined for the free soup.', 'Sir, with respect, is this a drill?', "Poke me again and I'll report you to the sergeant."],
+    },
+    archer: {
+      select: ['Yes?', 'Arrows nocked.', 'Eyes on the horizon.', 'Ready.', 'Speak, my lord.'],
+      ack: ['On my way.', 'Understood.', 'Swift as the wind.', 'Moving.', 'I go.'],
+      attack: ['Loose!', 'Target sighted!', 'Fire at will!', "They won't see it coming."],
+      ready: ['Bow strung and ready.', 'Archer, ready to serve.'],
+      annoyed: ['I could shoot an apple off your head from here.', 'Careful. My aim wavers when I am vexed.', 'Find someone else to pester.', 'I am counting my arrows. One for each poke.'],
+    },
+    knight: {
+      select: ['My liege?', 'For honour!', 'My steed is ready.', 'Command me.', 'Your champion awaits.'],
+      ack: ['Onward!', 'As you command.', 'Ride!', 'With haste!', 'It shall be done.'],
+      attack: ['For the King!', 'Lances down!', 'Ride them down!', 'For glory!'],
+      ready: ['Lancer, reporting for duty.', 'My lance is yours, my liege.'],
+      annoyed: ['A knight does not care to be prodded.', 'My horse grows impatient with you.', 'I polished this armour for three hours.', 'Is there a dragon, or are you merely bored?'],
+    },
+    siege: {
+      select: ['Engine ready!', 'Loaded and waiting.', 'Point us at something big.', 'Mangonel crew here!'],
+      ack: ['Heave!', 'Rolling out.', 'Mind the wheels!', 'Push, lads, push!'],
+      attack: ['Fire the engine!', 'Let fly!', 'Bring down the walls!', 'Stone away!'],
+      ready: ['Siege engine assembled!', 'Mangonel ready to roll!'],
+      annoyed: ['Do you know how heavy this thing is?', 'One more poke, and we load you into it!', 'Careful, it bites.'],
+    },
+    narrator: {
+      attacked: ['We are under attack, my lord!', 'Our people are under attack!', 'The enemy is upon us!'],
+      gold: ['Not enough gold, my lord.', 'Our treasury is too thin. Mine more gold.'],
+      wood: ['We need more lumber.', 'Not enough lumber, my lord.'],
+      food: ['We need more farms to feed our people.', 'Our granaries are empty. Build more farms.'],
+      built: ['Construction complete.'],
+      cantBuild: ['We cannot build there.'],
+      requires: ['We lack the buildings required.'],
+      mine: ['A gold mine has run dry.'],
+      noTrees: ['There are no trees nearby.'],
+      fallen: ['An enemy has been vanquished!'],
+      victory: ['Victory is ours! The realm rejoices!'],
+      defeat: ['We have been defeated. Vale has fallen.'],
+      welcome: ['The realm awaits your command, my lord.'],
+    },
+  },
+  [W]: {
+    worker: {
+      select: ['Hmm?', 'What now?', 'Drudge here.', 'Yes, boss?', 'Ugh. More work?', 'Drudge listening.'],
+      ack: ['Fine.', 'Drudge go.', 'Okay, okay.', 'Yes, boss.', 'Hmph. On it.', 'If boss say so.'],
+      work: ['Dig, dig, dig.', 'Chop, chop. Drudge hate chop.', 'Work never end.'],
+      build: ['Drudge build good hut.', 'Stack wood. Bang nails.'],
+      attack: ['Drudge fight? Okay.', 'Bonk them!'],
+      ready: ['Drudge ready to work.', 'New drudge. Same work.'],
+      done: ['Build is done!', 'Finished, boss!', 'Hut built. Drudge rest now?'],
+      annoyed: ['Why boss poke?', 'Drudge tired. Go away.', 'Poke again, Drudge bite.', 'Drudge want nap!', 'Drudge quit. No. Drudge no allowed quit.'],
+    },
+    soldier: {
+      select: ['Who to smash?', 'Brute ready!', 'Raaah?', 'Speak!', 'Brute listen.'],
+      ack: ['Smash later.', 'Going!', 'Hmph. Fine.', 'Brute obey.', 'Move. Yes.'],
+      attack: ['Smash them!', 'Blood and ash!', 'Crush!', 'Break their bones!'],
+      ready: ['Brute hungry for battle!', 'Brute ready to smash!'],
+      annoyed: ['Brute not toy!', 'Stop it, or Brute smash you!', 'Argh! Brute getting angry.', 'Brute count to ten. Brute only know three.'],
+    },
+    archer: {
+      select: ['Spear ready.', 'Hunt?', 'Yes, chief?', 'I see far.'],
+      ack: ['Hunting.', 'Tracking.', 'Me go quick.', 'Quiet like shadow.'],
+      attack: ['Spear find heart!', 'Throw!', 'Pierce them!', 'Hunt them!'],
+      ready: ['Spears sharp!', 'Thrower ready for hunt.'],
+      annoyed: ['Next spear go in you.', 'You annoying, like fly.', 'I aim for flies. You next.'],
+    },
+    knight: {
+      select: ['Wolf hungry.', 'Ride?', 'Teeth ready!', 'Hmm. Where to?'],
+      ack: ['Run, wolf, run!', 'Fast as fang!', 'Rah! Go!', 'We ride!'],
+      attack: ['Feast, wolf!', 'Hunt them down!', 'Tear them apart!', 'Fresh meat!'],
+      ready: ['Wolf rider ready to hunt!', 'Wolf and rider, ready!'],
+      annoyed: ['Wolf will eat you.', 'Even wolf think you strange.', 'Wolf bite hand that poke.'],
+    },
+    siege: {
+      select: ['Big rock ready.', 'Boulders!', 'Point and throw?', 'Hurler here.'],
+      ack: ['Push! Push!', 'Rolling.', 'Heavy! Going.', 'Grunt. Push.'],
+      attack: ['Throw big rock!', 'Smash walls!', 'Rocks fly!', 'Boom!'],
+      ready: ['Rock hurler built!', 'Rocks loaded!'],
+      annoyed: ['Rock hurler fall on you.', 'Why you bother us?', 'We throw you over wall.'],
+    },
+    narrator: {
+      attacked: ['Enemies attack us!', 'Warband is under attack!', 'They come! To arms!'],
+      gold: ['Need more gold!', 'Not enough gold, chieftain.'],
+      wood: ['Need more wood!', 'Not enough lumber!'],
+      food: ['Need more granaries!', 'Warband hungry. Build granary.'],
+      built: ['Building done.'],
+      cantBuild: ['Cannot build there!'],
+      requires: ['Need other building first!'],
+      mine: ['Gold mine is empty!'],
+      noTrees: ['No trees here!'],
+      fallen: ['Enemy crushed!'],
+      victory: ['Victory! The land burns for the Warband!'],
+      defeat: ['The Warband is broken.'],
+      welcome: ['Warband awaits, chieftain.'],
+    },
+  },
+};
+

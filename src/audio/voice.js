@@ -1,5 +1,5 @@
 // Tiny formant synthesizer (glottal sawtooth -> three resonant formant filters).
-// Used for battle cries, death screams, animal noises and the retro "babble" speech mode.
+// Used for death screams, battle cries and animal noises.
 import { ac, noise } from './core.js';
 
 export const VOWELS = {
@@ -44,31 +44,4 @@ export function voice(dest, t, o) {
     src.connect(bp); bp.connect(g); g.connect(out);
   }
   for (const s of oscs) { s.start(t); s.stop(end + 0.15); }
-}
-
-// "Babble" speech: turns a line of text into syllables with consonant clicks and
-// a pitch contour (falling for statements, rising for questions), like the
-// garbled voices of early sound-card games. prof: {pitch, size, rate, rough}
-const VOW_FOR = { a: 'a', e: 'e', i: 'i', o: 'o', u: 'u', y: 'i' };
-export function babble(dest, text, prof, t0) {
-  const words = text.toLowerCase().replace(/[^a-z' ?!.,]/g, '').split(/\s+/).filter(Boolean);
-  const q = /\?\s*$/.test(text), ex = /!\s*$/.test(text);
-  const syl = []; for (const w of words) { const m = w.match(/[aeiouy]+/g) || ['a']; m.forEach((v, i) => syl.push({ v: VOW_FOR[v[0]] || 'uh', c: w[0], end: i === m.length - 1 })); }
-  let t = t0; const n = syl.length, rate = prof.rate || 1;
-  syl.forEach((s, i) => {
-    const pos = i / Math.max(1, n - 1);
-    let p = prof.pitch * (1.1 - 0.25 * pos); if (q && i >= n - 2) p *= 1.3; if (ex && i === 0) p *= 1.2;
-    const d = (0.11 + (s.end ? 0.05 : 0)) / rate;
-    if ('ptkbdgcq'.includes(s.c)) noiseClick(dest, t, 0.018, 2500 * prof.size, 0.18);
-    else if ('sfzhx'.includes(s.c)) noiseClick(dest, t, 0.05, 5000 * prof.size, 0.08);
-    const nxt = syl[i + 1] ? syl[i + 1].v : 'uh';
-    voice(dest, t + 0.012, { dur: d, f0: [[0, p], [d, p * 0.93]], v: [[0, s.v], [d, s.end ? 'uh' : nxt]], size: prof.size, rough: prof.rough, breath: 0.04, gain: 0.32, attack: 0.012, release: 0.03 });
-    t += d + (s.end ? 0.035 / rate : 0.008);
-  });
-  return t - t0;
-}
-function noiseClick(dest, t, dur, f, vol) {
-  const s = ac.createBufferSource(); s.buffer = noise(); const b = ac.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = f; b.Q.value = 1.5;
-  const g = ac.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  s.connect(b); b.connect(g); g.connect(dest); s.start(t, Math.random()); s.stop(t + dur + 0.02);
 }

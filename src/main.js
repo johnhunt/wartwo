@@ -47,8 +47,8 @@ whenUnlocked(() => $('snd-hint').classList.add('hidden'));
 let soundBack = 'p-title';
 function openSound(from) {
   soundBack = from; sfx.play('click');
-  $('snd-music').value = settings.music; $('snd-sfx').value = settings.sfx; $('snd-speech').value = settings.speech; $('snd-voice').value = settings.voiceMode;
-  $('snd-voice-note').textContent = speech.hasVoices() ? '' : 'Your browser has no built-in English voices, so units will use the retro sound-card voice.';
+  $('snd-music').value = settings.music; $('snd-sfx').value = settings.sfx; $('snd-speech').value = settings.speech; $('snd-voice').value = settings.voiceMode === 'off' ? 'off' : 'voices';
+  speech.preload([0, 1]);
   show('p-sound');
 }
 $('b-sound').onclick = () => openSound('p-title');
