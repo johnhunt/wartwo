@@ -4,6 +4,7 @@ import { Lockstep, Lobby } from './net.js';
 import { TILE, TICK_MS, UNITS, BUILDINGS, MAX_SELECT, nameOf } from './data.js';
 import { TEAM_COLORS, teamCSS } from './palette.js';
 import * as sfx from './sfx.js';
+import { cursorSprite, prewarm, warmStep, stonePanel } from './sprites.js';
 
 const $ = (id) => document.getElementById(id);
 const cv = $('screen');
@@ -17,6 +18,9 @@ function fit() {
   cv.style.width = (640 * k) + 'px'; cv.style.height = (480 * k) + 'px';
 }
 window.addEventListener('resize', fit); fit();
+
+// menus share the in-game carved stone texture
+try { document.documentElement.style.setProperty('--stone-img', `url(${stonePanel(176, 208, 5).toDataURL()})`); } catch { /* cosmetic only */ }
 
 // ------------------------------------------------------------------ menus
 const panels = ['p-title', 'p-sp', 'p-mp', 'p-room', 'p-help', 'p-pause'];
@@ -92,7 +96,7 @@ function renderLobby() {
   const sl = $('room-slots'); sl.innerHTML = '';
   if (r) r.slots.forEach((s, i) => {
     const el = document.createElement('div'); el.className = 'item';
-    el.innerHTML = `<span><span class="swatch" style="background:${TEAM_COLORS[i][1]}"></span>${esc(s.name)} <span class="muted">${s.faction ? 'Ashen Warband' : 'Kingdom of Vale'}${s.ai ? ' · computer' : ''}${i === 0 ? ' · host' : ''}</span></span>`;
+    el.innerHTML = `<span><span class="swatch" style="background:${TEAM_COLORS[i][2]}"></span>${esc(s.name)} <span class="muted">${s.faction ? 'Ashen Warband' : 'Kingdom of Vale'}${s.ai ? ' · computer' : ''}${i === 0 ? ' · host' : ''}</span></span>`;
     if (isHost && i > 0) { const b = document.createElement('button'); b.className = 'small'; b.textContent = 'Remove'; b.onclick = () => lobby.removeSlot(i); el.appendChild(b); }
     sl.appendChild(el);
   });
@@ -117,6 +121,7 @@ function startGame(opts, mySlot, lob) {
     selection: [], mode: null, menu: null, msgs: [], mouse: { x: 320, y: 240, inView: false }, drag: null, buttons: [], hoverBtn: null,
     groups: {}, marker: null, ping: null, lastAlert: null, players: opts.players, lastGroup: null, lastGroupT: 0,
   };
+  prewarm([...new Set(opts.players.map(p => p.faction))]);
   running = true; paused = false; show(null);
   window.__wartwo = { game, R, LS, ui };
   addMsg('Gather gold and lumber, build farms and raise an army!');
@@ -129,6 +134,7 @@ function addMsg(text) { ui.msgs.push({ text, t: performance.now() }); if (ui.msg
 let last = performance.now(), acc = 0, alertT = 0;
 function loop(now) {
   requestAnimationFrame(loop);
+  warmStep(running ? 4 : 8);
   if (!running) { drawTitleBackdrop(now); return; }
   advance(now);
   scroll();
@@ -349,12 +355,9 @@ function drawCursor() {
     ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, 6, 0, Math.PI * 2); ctx.moveTo(x - 9, y + 0.5); ctx.lineTo(x - 3, y + 0.5); ctx.moveTo(x + 4, y + 0.5); ctx.lineTo(x + 10, y + 0.5); ctx.moveTo(x + 0.5, y - 9); ctx.lineTo(x + 0.5, y - 3); ctx.moveTo(x + 0.5, y + 4); ctx.lineTo(x + 0.5, y + 10); ctx.stroke();
     return;
   }
-  let col = '#f0d878';
-  if (inView(x, y) && !ui.mode) { const [wx, wy] = R.screenToWorld(x, y); const t = R.entityAt(wx, wy); if (t) col = t.owner === LS.mySlot ? '#60ff60' : t.owner < 0 ? '#ffff60' : '#ff6060'; }
-  ctx.save(); ctx.translate(x, y);
-  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 13); ctx.lineTo(3, 10); ctx.lineTo(6, 16); ctx.lineTo(8, 15); ctx.lineTo(5, 9); ctx.lineTo(9, 9); ctx.closePath();
-  ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
-  ctx.restore();
+  let kind = 'gold';
+  if (inView(x, y) && !ui.mode) { const [wx, wy] = R.screenToWorld(x, y); const t = R.entityAt(wx, wy); if (t) kind = t.owner === LS.mySlot ? 'own' : t.owner < 0 ? 'neutral' : 'enemy'; }
+  ctx.drawImage(cursorSprite(kind), Math.round(x) - 1, Math.round(y) - 1);
 }
 
 // ------------------------------------------------------------------ title backdrop

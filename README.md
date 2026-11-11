@@ -27,7 +27,9 @@ It also works as-is on GitHub Pages.
 - Food limit, training queues, rally points, damaged buildings catch fire, corpses and rubble
 - Fog of war (unexplored areas are black, explored ones dithered), minimap, a 9-unit selection limit, control groups, attack-move, stand ground
 - Computer opponent that builds, expands to new mines, defends and attacks in waves
-- All graphics are generated in code as palette indices, with team colours remapped from one shared colour ramp. Sound effects are synthesized with WebAudio
+- All graphics are generated in code, with no image files. Units and buildings are modelled from simple 3D shapes and drawn by a small built-in software renderer into shaded, outlined, 256-colour pixel art: 8 facings, walk and attack cycles, ground shadows, and team colours remapped from one shared colour ramp
+- Terrain is painted per pixel from the tile map, so grass, dirt, beaches and water meet along ragged natural borders. Water is animated, and units walk behind trees and rocks
+- Sound effects are synthesized with WebAudio
 
 ## Multiplayer
 
@@ -64,7 +66,11 @@ online games too.
 - `src/map.js`: seeded map generator and RNG
 - `src/net.js`: P2P lobby and lockstep driver
 - `src/render.js`: viewport, fog, minimap and HUD
-- `src/sprites.js`: procedural pixel-art generator
+- `src/r3d.js`: software renderer that turns 3D primitives into palette-indexed pixel art
+- `src/units.js`, `src/buildings.js`: unit and building models for both factions
+- `src/terrain.js`: ground painter, water animation, trees and rocks
+- `src/sprites.js`: sprite cache, effects, icons, portraits and interface art
+- `src/img.js`: indexed-colour image buffer
 - `src/palette.js`: 256-colour palette and team colour remapping
 - `src/sfx.js`: synthesized sound
 - `src/main.js`: menus, input and the main loop
