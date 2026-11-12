@@ -74,7 +74,7 @@ $('b-mp').onclick = async () => {
   const name = $('mp-name').value.trim() || 'Commander';
   lobby = new Lobby(name, renderLobby);
   lobby.on('start', (d) => { const slot = d.players.findIndex(p => p.peer === lobby.selfId); startGame(d, slot, lobby); });
-  lobby.on('msg', (m) => { $('room-note').textContent = m; show('p-mp'); });
+  lobby.on('msg', (m) => { if (running) return; $('mp-status').textContent = m; show('p-mp'); });
   try { await lobby.connect(); $('mp-status').textContent = 'connected — looking for games'; }
   catch (e) { console.error(e); $('mp-status').textContent = 'could not load networking: ' + e.message; lobby = null; }
   renderLobby();

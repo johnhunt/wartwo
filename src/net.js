@@ -45,7 +45,12 @@ export class Lobby {
       this.pushRoster();
     };
     this.a.leave.onMessage = (d, { peerId }) => { if (this.hosting) { this.hosting.slots = this.hosting.slots.filter(s => s.peer !== peerId); this.pushRoster(); } };
-    this.a.roster.onMessage = (d, { peerId }) => { if (this.joined === peerId) { this.roster = d; this.changed(); } };
+    this.a.roster.onMessage = (d, { peerId }) => {
+      if (this.joined !== peerId) return;
+      if (!d || d.closed || !Array.isArray(d.slots)) { this.joined = null; this.roster = null; this.emit('msg', d && d.kicked ? 'You were removed from the game.' : 'The host closed the game.'); }
+      else this.roster = d;
+      this.changed();
+    };
     this.a.start.onMessage = (d, { peerId }) => { if (this.joined === peerId) { this.started = true; this.emit('start', d); } };
     for (const k of ['turn', 'hash', 'chat', 'drop']) this.a[k].onMessage = (d, { peerId }) => this.emit(k, d, peerId);
     this.helloTimer = setInterval(() => { this.sayHello(); this.prune(); }, 3000);
@@ -66,7 +71,12 @@ export class Lobby {
     this.joined = null; this.roster = null; this.sayHello(); this.pushRoster();
   }
   addAI(faction) { if (this.hosting && this.hosting.slots.length < this.hosting.max) { this.hosting.slots.push({ ai: true, name: 'Computer', faction }); this.pushRoster(); } }
-  removeSlot(i) { if (this.hosting && i > 0) { this.hosting.slots.splice(i, 1); this.pushRoster(); } }
+  removeSlot(i) {
+    if (!this.hosting || i <= 0) return;
+    const [s] = this.hosting.slots.splice(i, 1);
+    if (s && s.peer) this.a.roster.send({ closed: true, kicked: true }, { target: [s.peer] });
+    this.pushRoster();
+  }
   pushRoster() {
     if (!this.hosting) return;
     const r = { title: this.hosting.title, slots: this.hosting.slots, size: this.hosting.size, max: this.hosting.max };
@@ -76,7 +86,11 @@ export class Lobby {
     this.sayHello(); this.changed();
   }
   join(hostId, faction) { this.hosting = null; this.joined = hostId; this.faction = faction; this.a.join.send({ name: this.name, faction }, { target: hostId }); this.changed(); }
-  leaveGame() { if (this.joined) this.a.leave.send({}, { target: this.joined }); this.joined = null; this.roster = null; this.hosting = null; this.sayHello(); this.changed(); }
+  leaveGame() {
+    if (!this.a) return;
+    if (this.joined) this.a.leave.send({}, { target: this.joined });
+    if (this.hosting && !this.hosting.started) { const t = this.hosting.slots.filter(s => s.peer && s.peer !== this.selfId).map(s => s.peer); if (t.length) this.a.roster.send({ closed: true }, { target: t }); }
+    this.started = false; this.joined = null; this.roster = null; this.hosting = null; this.sayHello(); this.changed(); }
   start(seed) {
     const h = this.hosting; if (!h) return null;
     h.started = true;

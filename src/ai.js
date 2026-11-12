@@ -14,10 +14,10 @@ function cmd(g, p, c) { c.p = p.id; g.exec(c); }
 
 export function aiTick(g, p) {
   const st = p.aiState;
-  const mine = [], workers = [], army = [], blds = [];
+  const workers = [], army = [], blds = [];
   for (const e of g.ents) {
     if (e.dead || e.owner !== p.id) continue;
-    if (e.unit) { if (UNITS[e.type].worker) workers.push(e); else army.push(e); mine.push(e); } else blds.push(e);
+    if (e.unit) { if (UNITS[e.type].worker) workers.push(e); else army.push(e); } else blds.push(e);
   }
   const hall = blds.find(b => b.type === 'hall' && b.built) || blds.find(b => b.type === 'hall');
   const count = t => blds.filter(b => b.type === t).length;
@@ -26,29 +26,55 @@ export function aiTick(g, p) {
   const totalUnits = workers.length + army.length;
 
   // --- economy: assign idle workers
+  const mineEnt = bestMine(g, p, blds);
   if (hall) {
     let gold = 0, wood = 0;
     for (const w of workers) if (w.order && w.order.type === 'gather') { if (w.order.kind === 'gold') gold++; else wood++; }
-    const mineEnt = bestMine(g, p, blds);
-    // too much lumber, not enough gold: move some woodcutters to the mine
-    if (mineEnt && p.wood > 2500 && p.gold < 1500) {
+    const movable = (w, kind) => w.order && w.order.type === 'gather' && w.order.kind === kind && !w.carry && !w.hidden;
+    if (mineEnt && p.wood > 2500 && (p.gold < 1500 || p.wood > 4000)) {
+      // lumber is piling up: move some woodcutters to the mine
       let n = 0;
-      for (const w of workers) if (n < 2 && w.order && w.order.type === 'gather' && w.order.kind === 'wood' && !w.carry && !w.hidden) { cmd(g, p, { t: 'gather', ids: [w.id], target: mineEnt.id }); n++; }
+      for (const w of workers) if (n < 2 && movable(w, 'wood')) { cmd(g, p, { t: 'gather', ids: [w.id], target: mineEnt.id }); n++; gold++; wood--; }
+    } else if (p.wood < 900 && wood < 2) {
+      // nobody is cutting and the stockpile is low: send a couple of miners back to the trees
+      const tr = g.nearestTree(hall.x + 2, hall.y + 2, 20);
+      for (const w of workers) if (tr && wood < 2 && gold > 2 && movable(w, 'gold')) { cmd(g, p, { t: 'gather', ids: [w.id], x: tr[0], y: tr[1] }); wood++; gold--; }
     }
     for (const w of workers) {
-      if (w.hidden || (w.order && w.order.type !== 'move')) continue;
-      if (w.order && w.order.type === 'move') continue;
-      if (mineEnt && (p.wood > 1500 || gold < 2 || wood >= Math.max(2, (gold + wood) * 0.3))) { cmd(g, p, { t: 'gather', ids: [w.id], target: mineEnt.id }); gold++; }
-      else { const tr = g.nearestTree(hall.x + 2, hall.y + 2, 20); if (tr) { cmd(g, p, { t: 'gather', ids: [w.id], x: tr[0], y: tr[1] }); wood++; } }
+      if (w.hidden || w.order) continue;
+      const tr = g.nearestTree(hall.x + 2, hall.y + 2, 20);
+      if (mineEnt && (!tr || p.wood > 1500 || gold < 2 || wood >= Math.max(2, (gold + wood) * 0.3))) { cmd(g, p, { t: 'gather', ids: [w.id], target: mineEnt.id }); gold++; }
+      else if (tr) { cmd(g, p, { t: 'gather', ids: [w.id], x: tr[0], y: tr[1] }); wood++; }
     }
     // train workers
     const wantWorkers = 9 + Math.min(6, (g.tick / 2400) | 0);
     if (workers.length < wantWorkers && hall.built && hall.train.length === 0 && freeFood > 0) cmd(g, p, { t: 'train', ids: [hall.id], utype: 'worker' });
   }
 
+  const free = w => !w.hidden && !w.carry && w.order && w.order.type === 'gather';
+  const builder = workers.find(w => free(w) && w.order.kind === 'wood') || workers.find(w => !w.hidden && !w.order) || workers.find(free);
+  let building = workers.some(w => w.order && w.order.type === 'build');
+
+  // --- expansion: when the home mine runs low, build a new hall by another mine
+  let saving = false;
+  const halls = blds.filter(b => b.type === 'hall');
+  const homeOk = mineEnt && mineEnt.gold > 2500 && halls.some(h => h.built && g.distEnt(h, mineEnt) < 8);
+  if (hall && !homeOk && halls.length < 4 && halls.every(h => h.built) && !pending('hall')) {
+    let target = null, bd = 1e9;
+    for (const m of g.ents) {
+      if (m.dead || m.type !== 'mine' || m.gold < 3000) continue;
+      if (g.ents.some(e => !e.dead && e.type === 'hall' && g.distEnt(e, m) < 9)) continue;
+      const d = g.distEnt(m, hall); if (d < bd) { bd = d; target = m; }
+    }
+    const spot = target && spotNearMine(g, target);
+    if (spot) {
+      const d = BUILDINGS.hall;
+      if (p.gold < d.gold || p.wood < d.wood) saving = true; // hold back on troops until we can afford it
+      else if (builder && !building) { cmd(g, p, { t: 'build', ids: [builder.id], btype: 'hall', x: spot[0], y: spot[1] }); building = true; }
+    }
+  }
+
   // --- construction
-  const builder = workers.find(w => w.order && w.order.type === 'gather' && w.order.kind === 'wood' && !w.hidden && !w.carry) || workers.find(w => !w.hidden && !w.order);
-  const building = workers.some(w => w.order && w.order.type === 'build');
   if (builder && hall && !building) {
     let want = null;
     if (freeFood <= 2 && p.foodCap < 60 && !blds.some(b => b.type === 'farm' && !b.built)) want = 'farm';
@@ -68,22 +94,6 @@ export function aiTick(g, p) {
     }
   }
 
-  // --- expansion: when the home mine runs low, build a new hall by another mine
-  if (hall && builder && !building && p.gold >= 1200 && p.wood >= 800 && count('hall') < 4) {
-    const home = bestMine(g, p, blds);
-    const halls = blds.filter(b => b.type === 'hall');
-    const homeOk = home && home.gold > 2500 && halls.some(h => g.distEnt(h, home) < 8);
-    if (!homeOk && !blds.some(b => b.type === 'hall' && !b.built)) {
-      let target = null, bd = 1e9;
-      for (const m of g.ents) {
-        if (m.dead || m.type !== 'mine' || m.gold < 3000) continue;
-        if (g.ents.some(e => !e.dead && e.type === 'hall' && g.distEnt(e, m) < 9)) continue;
-        const d = g.distEnt(m, hall); if (d < bd) { bd = d; target = m; }
-      }
-      if (target) { const spot = spotNearMine(g, target); if (spot) cmd(g, p, { t: 'build', ids: [builder.id], btype: 'hall', x: spot[0], y: spot[1] }); }
-    }
-  }
-
   // --- military production
   for (const b of blds) {
     if (b.type !== 'barracks' || !b.built || b.train.length >= 2) continue;
@@ -93,7 +103,19 @@ export function aiTick(g, p) {
     if (p.has.forge && army.filter(a => a.type === 'siege').length < 2) opts.push('siege');
     const u = opts[g.rng.int(opts.length)];
     const ud = UNITS[u];
-    if ((!ud.req || p.has[ud.req]) && p.gold >= ud.gold + 200 && p.wood >= ud.wood) cmd(g, p, { t: 'train', ids: [b.id], utype: u });
+    if ((!ud.req || p.has[ud.req]) && p.gold >= ud.gold + (saving ? BUILDINGS.hall.gold : 200) && p.wood >= ud.wood) cmd(g, p, { t: 'train', ids: [b.id], utype: u });
+  }
+
+  const idleArmy = army.filter(a => !a.order);
+  const since = g.tick - st.lastAttack;
+
+  // --- a wave that has finished off its target presses on to the next one instead of walking home
+  // no income and nothing in the bank: there will be no reinforcements, so throw in what's left
+  const broke = p.gold < UNITS.soldier.gold && (!mineEnt || (!workers.length && p.gold < UNITS.worker.gold));
+  const away = hall ? idleArmy.filter(a => g.distEnt(a, hall) > 18) : idleArmy;
+  if (away.length >= (hall && !broke ? 3 : 1)) {
+    const target = pickTarget(g, p, away[0]);
+    if (target) cmd(g, p, { t: 'amove', ids: away.map(a => a.id), x: target.x, y: target.y });
   }
 
   // --- defence: enemies near base
@@ -104,26 +126,33 @@ export function aiTick(g, p) {
       if (g.distEnt(e, hall) < 14) { threat = e; break; }
     }
     if (threat) {
-      const idle = army.filter(a => !a.order || a.order.type !== 'attack');
+      // call in whoever is nearby and not already fighting or heading for the intruder
+      const idle = army.filter(a => g.distEnt(a, hall) < 26 && (!a.order || a.order.type === 'move' ||
+        (a.order.type === 'amove' && !a.order.sub && g.distRect(a.order.x, a.order.y, threat.x, threat.y, 1) > 5)));
       if (idle.length) cmd(g, p, { t: 'amove', ids: idle.map(a => a.id), x: threat.x, y: threat.y });
       return;
     }
   }
 
   // --- attack waves
-  const idleArmy = army.filter(a => !a.order);
-  const need = 6 + st.wave * 3;
-  if (idleArmy.length >= Math.min(need, 22) && g.tick - st.lastAttack > 600) {
-    const target = pickTarget(g, p, hall || idleArmy[0]);
+  const home = hall ? idleArmy.filter(a => !away.includes(a)) : [];
+  const need = Math.min(6 + st.wave * 3, 22);
+  if (home.length && since > 600 && (home.length >= need || broke || (since > 3600 && home.length >= 4))) {
+    const target = pickTarget(g, p, hall);
     if (target) {
       st.wave++; st.lastAttack = g.tick;
-      cmd(g, p, { t: 'amove', ids: idleArmy.map(a => a.id), x: target.x, y: target.y });
+      cmd(g, p, { t: 'amove', ids: home.map(a => a.id), x: target.x, y: target.y });
     }
+  } else if (broke && !army.length && since > 1200 && !blds.some(b => b.train.length)) {
+    // nothing left to fight with and nothing to buy: the workers make a last stand rather than stall forever
+    const ids = workers.filter(w => !w.hidden).map(w => w.id);
+    const target = ids.length ? pickTarget(g, p, hall || g.get(ids[0])) : null;
+    if (target) { st.lastAttack = g.tick; cmd(g, p, { t: 'attack', ids, target: target.id }); }
   } else if (hall) {
     // gather idle army near the base front
     const gx = hall.x + 2 + (hall.x < g.w / 2 ? 6 : -6), gy = hall.y + 2 + (hall.y < g.h / 2 ? 6 : -6);
-    const loose = idleArmy.filter(a => Math.abs(a.x - gx) > 4 || Math.abs(a.y - gy) > 4);
-    if (loose.length) cmd(g, p, { t: 'move', ids: loose.map(a => a.id), x: Math.max(1, Math.min(g.w - 2, gx)), y: Math.max(1, Math.min(g.h - 2, gy)) });
+    const loose = home.filter(a => Math.abs(a.x - gx) > 4 || Math.abs(a.y - gy) > 4);
+    if (loose.length) cmd(g, p, { t: 'amove', ids: loose.map(a => a.id), x: Math.max(1, Math.min(g.w - 2, gx)), y: Math.max(1, Math.min(g.h - 2, gy)) });
   }
 }
 

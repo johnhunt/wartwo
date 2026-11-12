@@ -64,7 +64,7 @@ export const BUILD_ORDER = ['farm', 'barracks', 'mill', 'stable', 'forge', 'towe
 
 export const START_GOLD = 2000;
 export const START_WOOD = 1000;
-export const MINE_GOLD = 12000;
+export const MINE_GOLD = 40000;
 export const TREE_WOOD = 100;
 export const CARRY = 100;
 export const MINE_TIME = 40;   // ticks inside mine

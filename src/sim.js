@@ -175,10 +175,17 @@ export class Game {
   // ---------------------------------------------------------------- commands
   // cmd: {p, t, ids, x, y, target, btype, utype, q}
   exec(cmd) {
+    if (!cmd || typeof cmd !== 'object') return;
     const P = this.players[cmd.p]; if (!P || P.defeated) return;
-    const own = (cmd.ids || []).slice(0, 64).map(id => this.get(id)).filter(e => e && e.owner === cmd.p);
+    // commands arrive from other peers: never trust their shape
+    if ('x' in cmd || 'y' in cmd) {
+      if (!Number.isFinite(cmd.x) || !Number.isFinite(cmd.y)) return;
+      cmd.x = Math.max(0, Math.min(this.w - 1, Math.floor(cmd.x))); cmd.y = Math.max(0, Math.min(this.h - 1, Math.floor(cmd.y)));
+    }
+    const own = (Array.isArray(cmd.ids) ? cmd.ids : []).slice(0, 64).map(id => this.get(id)).filter(e => e && e.owner === cmd.p);
     switch (cmd.t) {
       case 'move': case 'amove': {
+        if (cmd.x === undefined) break;
         const units = own.filter(e => e.unit);
         const spots = this.formation(cmd.x, cmd.y, units.length);
         units.forEach((u, i) => { const s = spots[i] || [cmd.x, cmd.y]; this.setOrder(u, { type: cmd.t, x: s[0], y: s[1] }); });
@@ -189,7 +196,7 @@ export class Game {
         for (const u of own) if (u.unit && this.canAttack(u)) this.setOrder(u, { type: 'attack', target: t.id });
         break;
       }
-      case 'smart': this.smart(cmd.p, own, cmd); break;
+      case 'smart': if (cmd.x !== undefined) this.smart(cmd.p, own, cmd); break;
       case 'stop': for (const u of own) if (u.unit) this.setOrder(u, null); break;
       case 'hold': for (const u of own) if (u.unit) this.setOrder(u, { type: 'hold' }); break;
       case 'gather': {
@@ -199,7 +206,7 @@ export class Game {
       case 'ret': for (const u of own) if (u.unit && u.carry) this.setOrder(u, { type: 'gather', kind: u.carryKind, phase: 'ret', mine: u.lastMine, tx: u.lastTx, ty: u.lastTy }); break;
       case 'build': {
         const u = own.find(e => e.unit && UNITS[e.type].worker); if (!u) break;
-        const b = BUILDINGS[cmd.btype]; if (!b || b.neutral) break;
+        const b = Object.hasOwn(BUILDINGS, cmd.btype) ? BUILDINGS[cmd.btype] : null; if (!b || b.neutral || cmd.x === undefined) break;
         if (b.req && !P.has[b.req]) { this.emit({ t: 'msg', p: cmd.p, text: 'Requires ' + b.names[P.faction].toLowerCase(), code: 'requires' }); break; }
         if (P.gold < b.gold || P.wood < b.wood) { this.emit({ t: 'msg', p: cmd.p, text: P.gold < b.gold ? 'Not enough gold' : 'Not enough lumber', code: P.gold < b.gold ? 'gold' : 'wood' }); break; }
         this.setOrder(u, { type: 'build', btype: cmd.btype, x: cmd.x, y: cmd.y, tries: 0 });
@@ -230,7 +237,7 @@ export class Game {
         this.updatePlayers();
         break;
       }
-      case 'rally': for (const b of own) if (!b.unit) b.rally = { x: cmd.x, y: cmd.y, target: cmd.target || 0 }; break;
+      case 'rally': if (cmd.x !== undefined) for (const b of own) if (!b.unit) b.rally = { x: cmd.x, y: cmd.y, target: cmd.target || 0 }; break;
     }
   }
 
@@ -399,8 +406,10 @@ export class Game {
     t.hp -= v; t.lastHit = this.tick;
     if (t.hp <= 0) { this.kill(t, src ? src.owner : -1); return; }
     // retaliation
-    if (src && t.unit && !src.dead && !UNITS[t.type].worker && (!t.order || t.order.type === 'hold' && this.distEnt(t, src) <= UNITS[t.type].range)) {
-      t.order = { type: 'attack', target: src.id, auto: true }; t.path = null;
+    if (src && t.unit && !src.dead && !UNITS[t.type].worker && src.id) {
+      if (!t.order) { t.order = { type: 'attack', target: src.id, auto: true }; t.path = null; }
+      // standing ground: answer back without ever leaving the post
+      else if (t.order.type === 'hold' && !t.order.sub && this.distEnt(t, src) <= UNITS[t.type].range) t.order.sub = src.id;
     }
     if (t.owner >= 0) this.emit({ t: 'attacked', p: t.owner, x: t.x, y: t.y });
   }
@@ -434,6 +443,12 @@ export class Game {
       const dp = BUILDINGS[e.type].depot; if (!dp || !dp.includes(kind)) continue;
       const d = this.distEnt(u, e); if (d < bd) { bd = d; best = e; }
     }
+    return best;
+  }
+
+  nearestMine(from, maxD) {
+    let best = null, bd = maxD + 1;
+    for (const e of this.ents) if (!e.dead && e.type === 'mine') { const d = this.distEnt(from, e); if (d < bd) { bd = d; best = e; } }
     return best;
   }
 
@@ -566,7 +581,8 @@ export class Game {
         if (u.carryKind === 'gold') { P.gold += u.carry; P.goldMined += u.carry; } else { P.wood += u.carry; P.woodCut += u.carry; }
         this.emit({ t: 'deposit', p: u.owner, kind: u.carryKind });
         u.carry = 0; o.depot = 0;
-        if (o.kind === 'gold' && o.mine && this.get(o.mine)) { o.phase = 'go'; }
+        if (o.kind === 'gold' && !this.get(o.mine)) { const m = this.nearestMine(dep, 12); o.mine = m ? m.id : 0; if (m) u.lastMine = m.id; }
+        if (o.kind === 'gold' && o.mine) { o.phase = 'go'; }
         else if (o.kind === 'wood' && o.tx !== undefined) { o.phase = 'go'; }
         else u.order = null;
       } else if (r === 'stuck') { o.depot = 0; }
