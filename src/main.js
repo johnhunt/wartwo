@@ -33,6 +33,7 @@ const store = { get(k, d) { try { return localStorage.getItem('wartwo.' + k) ?? 
 const defaultName = store.get('name', 'Commander' + Math.floor(Math.random() * 900 + 100));
 $('sp-name').value = $('mp-name').value = defaultName;
 $('sp-faction').value = $('mp-faction').value = store.get('faction', '0');
+$('sp-level').value = store.get('level', '1');
 $('sp-seed').value = Math.floor(Math.random() * 99999);
 $('mp-title').value = defaultName + "'s battle";
 
@@ -63,8 +64,9 @@ music.onTrack((t) => { $('snd-now').textContent = t; });
 $('sp-go').onclick = () => {
   const name = $('sp-name').value.trim() || 'Commander', faction = +$('sp-faction').value;
   store.set('name', name); store.set('faction', faction);
-  const n = +$('sp-opp').value, players = [{ name, faction, color: 0 }];
-  for (let i = 0; i < n; i++) players.push({ name: 'Computer ' + (i + 1), faction: (faction + 1 + i) % 2 === 0 && i > 0 ? faction : 1 - faction, color: i + 1, ai: true });
+  const n = +$('sp-opp').value, level = +$('sp-level').value, players = [{ name, faction, color: 0 }];
+  store.set('level', level);
+  for (let i = 0; i < n; i++) players.push({ name: 'Computer ' + (i + 1), faction: (faction + 1 + i) % 2 === 0 && i > 0 ? faction : 1 - faction, color: i + 1, ai: true, level });
   startGame({ seed: +$('sp-seed').value || 1, size: +$('sp-size').value, players }, 0, null);
 };
 
@@ -196,8 +198,9 @@ function drainEvents() {
         break;
       case 'defeat': if (ev.p === me) { ui.banner = 'Defeat'; ui.subBanner = 'Your forces have been destroyed. Press F10 to leave.'; R.revealAll = true; } else addMsg(game.players[ev.p].name + ' has been defeated!'); break;
       case 'over': {
-        const won = me >= 0 && game.players[me].team === ev.team;
-        ui.banner = won ? 'Victory!' : 'Defeat'; ui.subBanner = won ? 'The land is yours. Press F10 to leave.' : 'Press F10 to leave.';
+        const won = me >= 0 && game.players[me].team === ev.team, draw = ev.draw && me >= 0 && !game.players[me].defeated;
+        ui.banner = won ? 'Victory!' : draw ? 'Stalemate' : 'Defeat';
+        ui.subBanner = won ? 'The land is yours. Press F10 to leave.' : draw ? 'No army can be raised by either side. Press F10 to leave.' : 'Press F10 to leave.';
         R.revealAll = true; break;
       }
     }
@@ -337,6 +340,14 @@ window.addEventListener('keydown', e => {
     if (ui.mode) { ui.mode = null; return; }
     if (ui.menu) { ui.menu = null; return; }
     const c = ui.buttons.find(b => b.hot === 'Escape' && b.act); if (c) pressButton(c);
+    return;
+  }
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const idle = game.ents.filter(u => u.owner === LS.mySlot && u.unit && UNITS[u.type].worker && !u.order && !u.hidden && !u.dead);
+    if (!idle.length) { addMsg('No idle workers.'); return; }
+    const next = idle[(idle.findIndex(u => u.id === ui.selection[0]) + 1) % idle.length];
+    ui.selection = [next.id]; ui.menu = null; ui.mode = null; R.centerOn(next.x * TILE + 16, next.y * TILE + 16); GA.selected([next]);
     return;
   }
   if (e.key === ' ') { if (ui.lastAlert) R.centerOn(ui.lastAlert.x * TILE, ui.lastAlert.y * TILE); e.preventDefault(); return; }

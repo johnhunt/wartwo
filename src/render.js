@@ -175,9 +175,12 @@ export class Renderer {
         const stage = e.built ? 2 : (e.progress / d.time < 0.4 ? 0 : 1);
         ctx.drawImage(S.buildingSprite(e.type, fac, team, stage), px - BO.x, py - BO.y);
         if (e.built && e.type !== 'mine' && e.hp < e.maxHp / 2) {
-          const big = e.hp < e.maxHp / 4; const fr = ((this.frame >> 2) + e.id) % 6, s = e.size * TILE;
-          ctx.drawImage(S.fireSprite(fr, big), px + s * 0.5 - (big ? 13 : 8), py + s * 0.45 - (big ? 38 : 24));
-          if (big) { ctx.drawImage(S.fireSprite((fr + 2) % 6, false), px + s * 0.2, py + s * 0.7 - 24); ctx.drawImage(S.fireSprite((fr + 4) % 6, false), px + s * 0.72, py + s * 0.3 - 24); }
+          const big = e.hp < e.maxHp / 4, fr = ((this.frame >> 2) + e.id) % S.FIRE_FRAMES, s = e.size * TILE;
+          const flame = (f, isBig, x, y) => { const sp = S.fireSprite(f % S.FIRE_FRAMES, isBig); ctx.drawImage(sp, Math.round(x) - sp.ax, Math.round(y) - sp.ay); };
+          // back to front so nearer flames overlap the ones behind
+          if (big) flame(fr + 5, false, px + s * 0.72 + 8, py + s * 0.3);
+          flame(fr, big, px + s * 0.5, py + s * 0.45);
+          if (big) flame(fr + 3, false, px + s * 0.2 + 8, py + s * 0.7);
         }
       }
     }

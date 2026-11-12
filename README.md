@@ -26,7 +26,7 @@ It also works as-is on GitHub Pages.
 - 5 units per faction: worker, infantry, ranged, cavalry and siege (siege does splash damage)
 - Food limit, training queues, rally points, damaged buildings catch fire, corpses and rubble
 - Fog of war (unexplored areas are black, explored ones dithered), minimap, a 9-unit selection limit, control groups, attack-move, stand ground
-- Computer opponent that builds, expands to new mines, defends and attacks in waves
+- Computer opponent (easy, normal or hard) that builds, expands to new mines, defends and attacks in waves
 - All graphics are generated in code, with no image files. Units and buildings are modelled from simple 3D shapes and drawn by a small built-in software renderer into shaded, outlined, 256-colour pixel art: 8 facings, walk and attack cycles, ground shadows, and team colours remapped from one shared colour ramp
 - Terrain is painted per pixel from the tile map, so grass, dirt, beaches and water meet along ragged natural borders. Water is animated, and units walk behind trees and rocks
 - Sound effects are synthesized with WebAudio
@@ -76,6 +76,7 @@ online games too.
 | Ctrl+1–9, 1–9 | Assign / recall a control group (press twice to centre the view) |
 | Arrows / screen edge | Scroll |
 | Space | Jump to the last alert |
+| Tab | Select the next idle worker |
 | Enter | Chat |
 | F10 | Menu |
 | P | Pause (single player) |

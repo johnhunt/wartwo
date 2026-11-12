@@ -4,7 +4,7 @@
 import { c, teamLUT, PAL, R, SHADOW } from './palette.js';
 import { rng } from './map.js';
 import { Img } from './img.js';
-import { render, sph, cap, box, slab, fru, mat, rot, aim, hash2, TEX } from './r3d.js';
+import { render, sph, cap, box, slab, fru, mat, rot, aim, hash2, norm, scl as scl3, TEX } from './r3d.js';
 import { unitModel, corpseModel, UNIT_VIEW } from './units.js';
 import { buildingModel, buildingView, B_PAD, boulder } from './buildings.js';
 
@@ -84,36 +84,78 @@ export function rubbleSprite(size) {
 }
 
 // ------------------------------------------------------------------ effects
-export function fireSprite(frame, big) {
-  return memo('fire' + frame + big, () => {
-    const w = big ? 26 : 16, h = big ? 38 : 24, im = new Img(w, h), F = R.fire, r = rng(frame * 13 + (big ? 5 : 0));
-    // smoke
-    for (let k = 0; k < (big ? 26 : 12); k++) { const x = w / 2 + (r.int(100) / 100 - 0.5) * w * 0.6 + Math.sin(frame + k) * 2, y = r.int(Math.round(h * 0.45)); if (((x | 0) + (y | 0)) & 1) im.set(x, y, c('gray', 2 + r.int(3))); }
-    // tongues of flame: columns with flickering height
-    for (let x = 0; x < w; x++) {
-      const u = (x - w / 2 + 0.5) / (w / 2), env = 1 - u * u;
-      const ht = env * h * (0.42 + 0.3 * Math.abs(Math.sin(x * 1.7 + frame * 1.9)) + 0.2 * hash2(x, frame));
-      for (let y = 0; y < ht; y++) {
-        const t = y / (ht + 0.01), core = 1 - Math.abs(u) * 1.2;
-        let v = 7.4 - t * 6.2 + core * 1.6 + (hash2(x + frame * 7, y) - 0.5) * 1.6;
-        im.set(x, h - 1 - y, F[Math.max(0, Math.min(7, Math.round(v)))]);
-      }
-    }
-    return im.toCanvas(lut(0));
+// Flames, smoke and explosions are modelled like everything else: glowing cones and blobs
+// rendered through r3d, so they have volume and sit in the same oblique view as the buildings.
+const VIEW_DIR = [0, 0.837, 0.546]; // unit vector towards the camera for the default projection
+// self-lit material: hottest low down and where the surface faces the viewer, cooling to dark red at the rim
+function flameMat(top, heat, seed) {
+  return mat('fire', 0, 7, {
+    glow: 1, noShadow: true, tex: (lp, n, wp) => {
+      const f = Math.max(0, n[0] * VIEW_DIR[0] + n[1] * VIEW_DIR[1] + n[2] * VIEW_DIR[2]);
+      const t = Math.max(0, Math.min(1, wp[2] / top));
+      return { abs: heat * (1.08 - 0.72 * t) * (0.34 + 0.66 * Math.pow(f, 0.8)) + (hash2(wp[0] * 1.5 + seed, wp[2] * 1.5 - seed) - 0.5) * 0.14 };
+    },
   });
 }
+const SMOKE = mat('gray', 3, 10, { noShadow: true, tex: TEX.noise(0.12, 0.8) });
+// copy `src` onto `dst`, thinning it with an ordered pattern (0 = solid ... 3 = wisps) to fake translucency
+function blitThin(dst, src, level) {
+  for (let y = 0; y < src.h; y++) for (let x = 0; x < src.w; x++) {
+    const v = src.d[y * src.w + x]; if (!v) continue;
+    if (level === 1 && (x & 1) && (y & 1)) continue;
+    if (level === 2 && ((x + y) & 1)) continue;
+    if (level >= 3 && ((x & 1) || (y & 1))) continue;
+    dst.d[y * src.w + x] = v;
+  }
+}
+
+export const FIRE_FRAMES = 8;
+// A looping building fire. The canvas carries .ax/.ay: the pixel that sits on the burning spot.
+export function fireSprite(frame, big) {
+  return memo('fire' + frame + big, () => {
+    const S = big ? 1.3 : 0.85, w = Math.round(40 * S) + 2, h = Math.round(64 * S), ax = Math.round(16 * S), ay = h - Math.round(6 * S);
+    const ph = (k) => Math.sin((frame / FIRE_FRAMES + k) * Math.PI * 2), TOP = 30;
+    const view = { w, h, ox: ax, oy: ay, scale: S, shadow: false, outline: false, selfShadow: false, ground: false, dither: 0.9, edge: 1.6, edgeDark: 1 };
+    // tongues: [x, y, base radius, height, phase]
+    const P = [], fm = flameMat(TOP, 1, frame * 7.3);
+    for (const [x, y, r, ht, k] of [[0, 0, 5.6, 27, 0], [-5.6, 1.5, 4.3, 17, 0.37], [5.4, 1, 4.4, 19, 0.71], [-1.5, 4.5, 4, 13, 0.18], [2.5, -3.5, 4.2, 22, 0.55], [-9, -1, 3, 10, 0.86], [9, 2.5, 2.9, 9, 0.24]]) {
+      const hh = ht * (0.74 + 0.26 * ph(k)), lean = aim([0.16 * ph(k + 0.3) + 0.08, 0.05 * ph(k * 2 + 0.1), 1]);
+      P.push(sph([x, y, r * 0.7], [r, r, r * 0.9], fm), fru([x, y, r * 0.6], r * 0.96, 0, hh, fm, lean));
+    }
+    // licks of flame that break off and rise
+    for (const k of [0.1, 0.6]) {
+      const u = (frame / FIRE_FRAMES + k) % 1, r = 1.5 * (1 - u) + 0.4;
+      P.push(sph([(k - 0.35) * 9 + u * 2.5, 0, 19 + u * 10], [r, r, r * 1.6], fm));
+    }
+    const im = new Img(w, h);
+    // smoke puffs drift up and downwind, growing and thinning as they go
+    for (const k of [0, 1 / 3, 2 / 3]) {
+      const u = (frame / FIRE_FRAMES + k) % 1, r = 4 + u * 4.5;
+      const puff = [sph([2 + u * 9 + Math.sin(k * 20) * 2, -1, 24 + u * 24], [r, r, r * 0.85], SMOKE), sph([-1 + u * 7, 1, 21 + u * 21], [r * 0.7, r * 0.7, r * 0.6], SMOKE)];
+      blitThin(im, render(puff, { ...view, dither: 0.6 }), u < 0.3 ? 1 : u < 0.7 ? 2 : 3);
+    }
+    im.blit(render(P, view), 0, 0);
+    const cv = im.toCanvas(lut(0)); cv.ax = ax; cv.ay = ay; return cv;
+  });
+}
+// Explosion, 5 frames on a 48x48 canvas centred on (24,24): a fireball that swells, breaks up and leaves smoke.
 export function boomSprite(frame) {
   return memo('boom' + frame, () => {
-    const im = new Img(48, 48), F = R.fire, r = rng(frame + 99), rad = [5, 10, 15, 18, 20][frame], hole = [0, 0, 4, 11, 17][frame];
-    for (let y = 0; y < 48; y++) for (let x = 0; x < 48; x++) {
-      const dx = x - 24, dy = (y - 24) * 1.25, a = Math.atan2(dy, dx), d = Math.hypot(dx, dy);
-      const edge = rad * (0.78 + 0.22 * Math.sin(a * 5 + frame * 2) + 0.16 * Math.sin(a * 9 - frame)) + (hash2(x, y) - 0.5) * 3;
-      if (d > edge || d < hole * (0.8 + 0.3 * Math.sin(a * 4))) continue;
-      const t = d / (edge + 0.01);
-      if (frame >= 3) { if ((x + y) & 1 || frame === 3) im.set(x, y, t > 0.75 ? c('gray', 2 + ((hash2(x, y) * 3) | 0)) : F[Math.max(0, Math.round(3 - t * 3))]); }
-      else im.set(x, y, F[Math.max(0, Math.min(7, Math.round(8.4 - t * 6 - frame * 1.2 + (hash2(x, y) - 0.5) * 1.5)))]);
+    const r = rng(1234), u = () => r.int(2001) / 1000 - 1;
+    const grow = [0.38, 0.72, 1, 0.8, 0.45][frame], spread = [1.5, 4.5, 7.5, 10, 12][frame], heat = [1.12, 1, 0.82, 0.6, 0.42][frame];
+    const view = { w: 48, h: 48, ox: 24, oy: 31, shadow: false, outline: false, selfShadow: false, ground: false, dither: 0.9, edge: 1.8, edgeDark: 1 };
+    const fire = [], smoke = [], fm = flameMat(40, heat, frame * 5.1);
+    for (let k = 0; k < 9; k++) {
+      const d = norm([u(), u(), u() * 0.8 + 0.3]), rad = (k ? 4.2 + (k % 3) : 7) * grow, c0 = k ? scl3(d, spread) : [0, 0, 0];
+      fire.push(sph([c0[0], c0[1], 7 + c0[2]], [rad, rad, rad], fm));
+      if (frame >= 2) { const sr = 3.4 + (k % 3) * 1.2 + (frame - 2) * 0.8; smoke.push(sph([c0[0] * 1.15, c0[1] * 1.15, 9 + c0[2] * 1.1 + (frame - 2) * 4], [sr, sr, sr * 0.85], SMOKE)); }
     }
-    for (let k = 0; k < 10 + frame * 3; k++) { const a = r.int(628) / 100, d = rad + 1 + r.int(6); im.set(24 + Math.cos(a) * d, 24 + Math.sin(a) * d * 0.8, k & 1 ? F[5] : c('gray', 2)); }
+    // sparks thrown clear on a ballistic arc
+    const t = frame + 1;
+    for (let k = 0; k < 8; k++) { const dx = u(), dy = u(), up = 2.2 + (k % 3) * 0.7; fire.push(sph([dx * 4.6 * t, dy * 4.6 * t, Math.max(0.6, 7 + up * t - 0.42 * t * t)], Math.max(0.5, 1.5 - frame * 0.22), fm)); }
+    const im = new Img(48, 48);
+    if (smoke.length) blitThin(im, render(smoke, { ...view, dither: 0.6 }), frame - 2);
+    im.blit(render(fire, view), 0, 0);
     return im.toCanvas(lut(0));
   });
 }

@@ -2,7 +2,7 @@
 import { UNITS, BUILDINGS } from './data.js';
 
 export function aiInit(g, p) {
-  p.aiState = { wave: 0, lastAttack: 0, buildIdx: 0, rally: null };
+  p.aiState = { wave: 0, lastAttack: 0, nextTrain: 0 };
 }
 
 const BUILD_PLAN = [
@@ -10,10 +10,17 @@ const BUILD_PLAN = [
   ['forge', 12], ['tower', 12], ['farm', 13], ['farm', 15], ['tower', 16], ['farm', 18], ['farm', 20],
 ];
 
+// Difficulty (player.level: 0 easy, 1 normal, 2 hard). Integers only: this runs inside the lockstep sim.
+const LEVELS = [
+  { workers: 7, grow: 3, trainGap: 320, firstWave: 7200, waveGap: 2000, wave0: 5, barracks: 2, expandAt: 4000 },
+  { workers: 9, grow: 6, trainGap: 0, firstWave: 0, waveGap: 600, wave0: 6, barracks: 3, expandAt: 10000 },
+  { workers: 11, grow: 7, trainGap: 0, firstWave: 0, waveGap: 450, wave0: 6, barracks: 4, expandAt: 16000 },
+];
+
 function cmd(g, p, c) { c.p = p.id; g.exec(c); }
 
 export function aiTick(g, p) {
-  const st = p.aiState;
+  const st = p.aiState, L = LEVELS[p.level] || LEVELS[1];
   const workers = [], army = [], blds = [];
   for (const e of g.ents) {
     if (e.dead || e.owner !== p.id) continue;
@@ -26,7 +33,10 @@ export function aiTick(g, p) {
   const totalUnits = workers.length + army.length;
 
   // --- economy: assign idle workers
-  const mineEnt = bestMine(g, p, blds);
+  // the walkable area the base stands in: trees and mines outside it can't be reached on foot
+  const anyW = workers.find(w => !w.hidden);
+  const homeReg = anyW ? g.regionAt(anyW.x, anyW.y) : 0;
+  const mineEnt = bestMine(g, p, blds, homeReg);
   if (hall) {
     let gold = 0, wood = 0;
     for (const w of workers) if (w.order && w.order.type === 'gather') { if (w.order.kind === 'gold') gold++; else wood++; }
@@ -35,19 +45,19 @@ export function aiTick(g, p) {
       // lumber is piling up: move some woodcutters to the mine
       let n = 0;
       for (const w of workers) if (n < 2 && movable(w, 'wood')) { cmd(g, p, { t: 'gather', ids: [w.id], target: mineEnt.id }); n++; gold++; wood--; }
-    } else if (p.wood < 900 && wood < 2) {
+    } else if (p.wood < 900 && wood < 4) {
       // nobody is cutting and the stockpile is low: send a couple of miners back to the trees
-      const tr = g.nearestTree(hall.x + 2, hall.y + 2, 20);
-      for (const w of workers) if (tr && wood < 2 && gold > 2 && movable(w, 'gold')) { cmd(g, p, { t: 'gather', ids: [w.id], x: tr[0], y: tr[1] }); wood++; gold--; }
+      const tr = g.nearestTree(hall.x + 2, hall.y + 2, 20, homeReg);
+      for (const w of workers) if (tr && wood < 4 && gold > 2 && movable(w, 'gold')) { cmd(g, p, { t: 'gather', ids: [w.id], x: tr[0], y: tr[1] }); wood++; gold--; }
     }
     for (const w of workers) {
       if (w.hidden || w.order) continue;
-      const tr = g.nearestTree(hall.x + 2, hall.y + 2, 20);
+      const tr = g.nearestTree(hall.x + 2, hall.y + 2, 20, homeReg);
       if (mineEnt && (!tr || p.wood > 1500 || gold < 2 || wood >= Math.max(2, (gold + wood) * 0.3))) { cmd(g, p, { t: 'gather', ids: [w.id], target: mineEnt.id }); gold++; }
       else if (tr) { cmd(g, p, { t: 'gather', ids: [w.id], x: tr[0], y: tr[1] }); wood++; }
     }
     // train workers
-    const wantWorkers = 9 + Math.min(6, (g.tick / 2400) | 0);
+    const wantWorkers = L.workers + Math.min(L.grow, (g.tick / 2400) | 0);
     if (workers.length < wantWorkers && hall.built && hall.train.length === 0 && freeFood > 0) cmd(g, p, { t: 'train', ids: [hall.id], utype: 'worker' });
   }
 
@@ -58,11 +68,11 @@ export function aiTick(g, p) {
   // --- expansion: when the home mine runs low, build a new hall by another mine
   let saving = false;
   const halls = blds.filter(b => b.type === 'hall');
-  const homeOk = mineEnt && mineEnt.gold > 2500 && halls.some(h => h.built && g.distEnt(h, mineEnt) < 8);
+  const homeOk = mineEnt && mineEnt.gold > L.expandAt && halls.some(h => h.built && g.distEnt(h, mineEnt) < 8);
   if (hall && !homeOk && halls.length < 4 && halls.every(h => h.built) && !pending('hall')) {
     let target = null, bd = 1e9;
     for (const m of g.ents) {
-      if (m.dead || m.type !== 'mine' || m.gold < 3000) continue;
+      if (m.dead || m.type !== 'mine' || m.gold < 3000 || (homeReg && !g.touches(homeReg, m.x, m.y, m.size))) continue;
       if (g.ents.some(e => !e.dead && e.type === 'hall' && g.distEnt(e, m) < 9)) continue;
       const d = g.distEnt(m, hall); if (d < bd) { bd = d; target = m; }
     }
@@ -84,6 +94,8 @@ export function aiTick(g, p) {
         const need = BUILD_PLAN.filter(x => x[0] === t && x[1] <= totalUnits).length;
         if (have < need && !pending(t)) { want = t; break; }
       }
+      // gold piling up: more production buildings turn it into troops
+      if (!want && p.gold > 3000 && count('barracks') >= 2 && count('barracks') < L.barracks && !pending('barracks')) want = 'barracks';
     }
     if (want) {
       const d = BUILDINGS[want];
@@ -97,13 +109,13 @@ export function aiTick(g, p) {
   // --- military production
   for (const b of blds) {
     if (b.type !== 'barracks' || !b.built || b.train.length >= 2) continue;
-    if (freeFood <= 0) break;
+    if (freeFood <= 0 || g.tick < st.nextTrain) break;
     const opts = ['soldier', 'soldier', 'archer'];
     if (p.has.stable) opts.push('knight', 'knight');
     if (p.has.forge && army.filter(a => a.type === 'siege').length < 2) opts.push('siege');
     const u = opts[g.rng.int(opts.length)];
     const ud = UNITS[u];
-    if ((!ud.req || p.has[ud.req]) && p.gold >= ud.gold + (saving ? BUILDINGS.hall.gold : 200) && p.wood >= ud.wood) cmd(g, p, { t: 'train', ids: [b.id], utype: u });
+    if ((!ud.req || p.has[ud.req]) && p.gold >= ud.gold + (saving ? BUILDINGS.hall.gold : workers.length < 4 ? 2 * UNITS.worker.gold : 200) && p.wood >= ud.wood) { cmd(g, p, { t: 'train', ids: [b.id], utype: u }); if (L.trainGap) st.nextTrain = g.tick + L.trainGap; }
   }
 
   const idleArmy = army.filter(a => !a.order);
@@ -136,8 +148,8 @@ export function aiTick(g, p) {
 
   // --- attack waves
   const home = hall ? idleArmy.filter(a => !away.includes(a)) : [];
-  const need = Math.min(6 + st.wave * 3, 22);
-  if (home.length && since > 600 && (home.length >= need || broke || (since > 3600 && home.length >= 4))) {
+  const need = Math.min(L.wave0 + st.wave * 3, 22);
+  if (home.length && since > L.waveGap && g.tick >= L.firstWave && (home.length >= need || broke || (since > 3600 && home.length >= 4))) {
     const target = pickTarget(g, p, hall);
     if (target) {
       st.wave++; st.lastAttack = g.tick;
@@ -162,11 +174,11 @@ function nearestMine(g, from) {
   return best;
 }
 
-function bestMine(g, p, blds) {
+function bestMine(g, p, blds, reg) {
   const halls = blds.filter(b => b.type === 'hall' && b.built);
   let best = null, bd = 1e9;
   for (const m of g.ents) {
-    if (m.dead || m.type !== 'mine') continue;
+    if (m.dead || m.type !== 'mine' || (reg && !g.touches(reg, m.x, m.y, m.size))) continue;
     for (const h of halls) { const d = g.distEnt(m, h); if (d < bd) { bd = d; best = m; } }
   }
   return best;

@@ -21,7 +21,7 @@ export class Game {
     this.terrainVersion = 0;
     this.players = opts.players.map((p, i) => ({
       id: i, name: p.name, faction: p.faction, color: p.color, ai: !!p.ai, gold: START_GOLD, wood: START_WOOD,
-      food: 0, foodCap: 0, defeated: false, has: {}, team: p.team ?? i, kills: 0, lost: 0, goldMined: 0, woodCut: 0,
+      food: 0, foodCap: 0, defeated: false, has: {}, team: p.team ?? i, level: p.level === 0 || p.level === 2 ? p.level : 1, kills: 0, lost: 0, goldMined: 0, woodCut: 0,
     }));
     // pathfinding scratch
     const N = this.w * this.h;
@@ -308,11 +308,12 @@ export class Game {
   }
 
   updatePlayers() {
-    for (const p of this.players) { p.food = 0; p.foodCap = 0; p.has = {}; p.alive = 0; }
+    for (const p of this.players) { p.food = 0; p.foodCap = 0; p.has = {}; p.alive = 0; p.units = 0; p.busy = 0; }
     for (const e of this.ents) {
       if (e.owner < 0 || e.dead) continue;
       const p = this.players[e.owner]; p.alive++;
-      if (e.unit) p.food += UNITS[e.type].food;
+      if (e.unit) { p.food += UNITS[e.type].food; p.units++; }
+      else if (!e.built || e.train.length) p.busy++;
       else if (e.built) { p.foodCap += BUILDINGS[e.type].food || 0; p.has[e.type] = (p.has[e.type] || 0) + 1; }
     }
     for (const p of this.players) {
@@ -321,6 +322,16 @@ export class Game {
     const teams = new Set(this.players.filter(p => !p.defeated).map(p => p.team));
     if (!this.over && teams.size <= 1 && this.players.length > 1) { this.over = true; this.winner = [...teams][0] ?? -1; this.emit({ t: 'over', team: this.winner }); }
     else if (!this.over && this.players.length === 1 && this.players[0].defeated) { this.over = true; this.emit({ t: 'over', team: -1 }); }
+    // Stalemate: nobody has a unit left, nothing is being built or trained and nobody can pay for a new unit.
+    // Buildings can't hurt each other, so the battle could never end: call it a draw.
+    else if (!this.over && !this.missiles.length && this.players.every(p => p.defeated || (!p.units && !p.busy && !this.canTrainAny(p)))) {
+      this.over = true; this.emit({ t: 'over', team: -1, draw: true });
+    }
+  }
+
+  canTrainAny(p) {
+    for (const t in UNITS) { const d = UNITS[t]; if (p.has[d.from] && (!d.req || p.has[d.req]) && p.gold >= d.gold && p.wood >= d.wood) return true; }
+    return false;
   }
 
   updateBuilding(b) {
@@ -446,13 +457,43 @@ export class Game {
     return best;
   }
 
+  // Connected areas of walkable ground (buildings and units ignored), relabelled whenever the terrain changes.
+  // Lets workers and the AI skip trees and mines on the far side of water or rock instead of pathing at them forever.
+  regions() {
+    if (this.regVer === this.terrainVersion) return this.reg;
+    const W = this.w, H = this.h, reg = this.reg || (this.reg = new Int32Array(W * H)), stack = this.regStack || (this.regStack = new Int32Array(W * H));
+    reg.fill(0); let label = 0;
+    for (let i = 0; i < W * H; i++) {
+      if (reg[i] || !this.walkableTerrain(i % W, (i / W) | 0)) continue;
+      let n = 0; stack[n++] = i; reg[i] = ++label;
+      while (n) {
+        const c = stack[--n], x = c % W, y = (c / W) | 0;
+        for (let d = 0; d < 4; d++) {
+          const nx = x + DIRS[d][0], ny = y + DIRS[d][1]; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const ni = ny * W + nx; if (!reg[ni] && this.walkableTerrain(nx, ny)) { reg[ni] = label; stack[n++] = ni; }
+        }
+      }
+    }
+    this.regVer = this.terrainVersion; return reg;
+  }
+  regionAt(x, y) { return this.inMap(x, y) ? this.regions()[y * this.w + x] : 0; }
+  // can something standing in region `reg` get next to this square rect (a tree, mine or building)?
+  touches(reg, rx, ry, rs) {
+    const R = this.regions();
+    for (let y = ry - 1; y <= ry + rs; y++) for (let x = rx - 1; x <= rx + rs; x++) {
+      if (x >= rx && x < rx + rs && y >= ry && y < ry + rs) continue;
+      if (this.inMap(x, y) && R[y * this.w + x] === reg) return true;
+    }
+    return false;
+  }
+
   nearestMine(from, maxD) {
     let best = null, bd = maxD + 1;
     for (const e of this.ents) if (!e.dead && e.type === 'mine') { const d = this.distEnt(from, e); if (d < bd) { bd = d; best = e; } }
     return best;
   }
 
-  nearestTree(x, y, maxR = 14) {
+  nearestTree(x, y, maxR = 14, reg = 0) {
     for (let r = 0; r <= maxR; r++) {
       let best = null, bd = 1e9;
       for (let yy = y - r; yy <= y + r; yy++) for (let xx = x - r; xx <= x + r; xx++) {
@@ -460,7 +501,7 @@ export class Game {
         if (!this.isTree(xx, yy)) continue;
         // must have a walkable neighbour
         let ok = false; for (const [dx, dy] of DIRS) if (this.passable(xx + dx, yy + dy)) { ok = true; break; }
-        if (!ok) continue;
+        if (!ok || (reg && !this.touches(reg, xx, yy, 1))) continue;
         const d = (xx - x) * (xx - x) + (yy - y) * (yy - y);
         if (d < bd) { bd = d; best = [xx, yy]; }
       }
@@ -591,20 +632,22 @@ export class Game {
     if (o.kind === 'gold') {
       const m = this.get(o.mine); if (!m) { u.order = null; return; }
       if (o.phase === 'go') {
+        if (!this.touches(this.regionAt(u.x, u.y), m.x, m.y, m.size)) { u.order = null; return; }
         const r = this.moveToward(u, m.x, m.y, m.size, 1);
         if (r === 'arrived' && u.mp === 0) { this.hide(u, m); u.timer = MINE_TIME; }
         else if (r === 'stuck') u.order = null;
       }
     } else {
       if (o.phase === 'go') {
-        if (!this.isTree(o.tx, o.ty)) {
-          const t = this.nearestTree(o.tx, o.ty); if (!t) { u.order = null; this.emit({ t: 'msg', p: u.owner, text: 'No trees nearby', code: 'noTrees' }); return; }
+        const reg = this.regionAt(u.x, u.y);
+        if (!this.isTree(o.tx, o.ty) || !this.touches(reg, o.tx, o.ty, 1)) {
+          const t = this.nearestTree(o.tx, o.ty, 14, reg); if (!t) { u.order = null; this.emit({ t: 'msg', p: u.owner, text: 'No trees nearby', code: 'noTrees' }); return; }
           o.tx = t[0]; o.ty = t[1]; u.path = null;
         }
         const r = this.moveToward(u, o.tx, o.ty, 1, 1);
         if (r === 'arrived' && u.mp === 0) { o.phase = 'chop'; u.timer = CHOP_TIME; const dx = o.tx - u.x; if (dx) u.facing = dx > 0 ? 1 : -1; }
         else if (r === 'stuck') { // choose a different tree
-          const t = this.nearestTree(u.x, u.y, 10); if (t && (t[0] !== o.tx || t[1] !== o.ty)) { o.tx = t[0]; o.ty = t[1]; u.path = null; } else u.order = null;
+          const t = this.nearestTree(u.x, u.y, 10, reg); if (t && (t[0] !== o.tx || t[1] !== o.ty)) { o.tx = t[0]; o.ty = t[1]; u.path = null; } else u.order = null;
         }
       } else if (o.phase === 'chop') {
         if (!this.isTree(o.tx, o.ty)) { o.phase = 'go'; return; }
