@@ -111,12 +111,14 @@ export class Renderer {
   // ------------------------------------------------------------ main draw
   draw(alpha, ui) {
     const ctx = this.ctx, g = this.g; this.frame++;
+    // animation runs on the clock, not the frame count, so it looks the same on 60 Hz and 144 Hz screens
+    const now = performance.now(), dtf = Math.min(4, (now - (this.lastT ?? now)) / (1000 / 60)); this.lastT = now;
     if (this.frame % 6 === 0) this.computeVis();
     ctx.save();
     ctx.beginPath(); ctx.rect(VIEW.x, VIEW.y, VIEW.w, VIEW.h); ctx.clip();
     ctx.translate(VIEW.x - this.cam.x, VIEW.y - this.cam.y);
     // water first: the ground chunks are transparent over open water
-    ctx.fillStyle = this.waterPat[(this.frame >> 3) % WATER_FRAMES]; ctx.fillRect(this.cam.x, this.cam.y, VIEW.w, VIEW.h);
+    ctx.fillStyle = this.waterPat[Math.floor(now / 400) % WATER_FRAMES]; ctx.fillRect(this.cam.x, this.cam.y, VIEW.w, VIEW.h);
     const CP = CHUNK * TILE;
     const cx0 = Math.floor(this.cam.x / CP), cy0 = Math.floor(this.cam.y / CP), cx1 = Math.floor((this.cam.x + VIEW.w - 1) / CP), cy1 = Math.floor((this.cam.y + VIEW.h - 1) / CP);
     for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) {
@@ -145,7 +147,7 @@ export class Renderer {
       else if (!this.isExplored(e)) continue;
       list.push(e);
     }
-    const posOf = (e) => {
+    const posOf1 = (e) => {
       if (e.unit && e.mp <= 0) {
         // melee fighters lean in on whatever they are hitting, so blows visibly connect
         const o = e.order, t = o && UNITS[e.type].range === 1 && (e.cd > 0 || e.anim > 0) ? g.get(o.type === 'attack' ? o.target : o.sub) : null;
@@ -158,6 +160,28 @@ export class Renderer {
       if (!e.unit || e.mp <= 0) return [e.x * TILE, e.y * TILE];
       const f = Math.max(0, Math.min(1, (e.mp - alpha) / e.mt));
       return [(e.x - (e.x - e.px) * f) * TILE, (e.y - (e.y - e.py) * f) * TILE];
+    };
+    // Units going into a mine or building walk in through the wall and fade, and fade back in on the way out,
+    // rather than blinking out of existence. Purely cosmetic: tracked on the render side.
+    const FADE = 240, posOf0 = posOf1;
+    const inside = (e, b) => [Math.max(b.x, Math.min(b.x + b.size - 1, e.x)) * TILE, Math.max(b.y, Math.min(b.y + b.size - 1, e.y)) * TILE];
+    for (const e of g.ents) {
+      if (!e.unit || e.dead) continue;
+      if (e.hidden && !e._in) { const b = g.get(e.inside); e._in = true; e._inT = now; e._from = e._px !== undefined ? [e._px, e._py] : null; e._door = b ? inside(e, b) : null; e._bld = b ? { x: b.x, y: b.y, size: b.size } : null; }
+      else if (!e.hidden && e._in) { e._in = false; e._outT = now; e._door = e._bld ? inside(e, e._bld) : null; }
+      if (e.hidden && e._from && e._door && now - e._inT < FADE && (this.ally(e.owner) || this.visible[e.y * g.w + e.x])) {
+        const p = (now - e._inT) / FADE, x = e._from[0] + (e._door[0] - e._from[0]) * p, y = e._from[1] + (e._door[1] - e._from[1]) * p;
+        const dx = e._door[0] - e._from[0], dy = e._door[1] - e._from[1], P = g.players[e.owner];
+        if (dx || dy) e._dir = Math.round(Math.atan2(-dx, dy) / (Math.PI / 4) + 8) % 8;
+        ctx.globalAlpha = 1 - p * p;
+        ctx.drawImage(S.unitSprite(e.type, P.faction, P.color, 'walk' + (Math.floor(now / 100) & 3), e.carry ? e.carryKind : null, false, e._dir ?? 0), Math.round(x) - UO.x, Math.round(y) - UO.y);
+        ctx.globalAlpha = 1;
+      }
+    }
+    const fadeIn = (e) => (e._outT && e._door && now - e._outT < FADE ? (now - e._outT) / FADE : 1);
+    const posOf = (e) => {
+      const q = posOf0(e), p = e.unit ? fadeIn(e) : 1;
+      return p < 1 ? [q[0] + (e._door[0] - e.x * TILE) * (1 - p), q[1] + (e._door[1] - e.y * TILE) * (1 - p)] : q;
     };
     // trees and rocks join the depth sort so units can walk behind them
     for (let y = Math.max(0, ty0 - 1); y <= Math.min(g.h - 1, ty1 + 2); y++) for (let x = Math.max(0, tx0 - 1); x <= Math.min(g.w - 1, tx1 + 1); x++) {
@@ -178,13 +202,15 @@ export class Renderer {
         else if (e.anim > 0) frame = e.type === 'siege' ? (e.anim > 7 ? 'atk0' : 'atk1') : e.anim > 6 ? 'atk0' : e.anim > 3 ? 'atk1' : 'atk2';
         else if (e.mp > 0 || (e.path && e.order)) frame = 'walk' + (((g.tick >> 1) + e.id) & 3);
         const sp = S.unitSprite(e.type, fac, team, frame, e.carry ? e.carryKind : null, chopping, this.dirOf(e));
+        const a = fadeIn(e); if (a < 1) ctx.globalAlpha = 0.25 + 0.75 * a;
         ctx.drawImage(sp, Math.round(px) - UO.x, Math.round(py) - UO.y);
+        ctx.globalAlpha = 1;
       } else {
         const d = BUILDINGS[e.type];
         const stage = e.built ? 2 : (e.progress / d.time < 0.4 ? 0 : 1);
         ctx.drawImage(S.buildingSprite(e.type, fac, team, stage), px - BO.x, py - BO.y);
         if (e.built && e.type !== 'mine' && e.hp < e.maxHp / 2) {
-          const big = e.hp < e.maxHp / 4, fr = ((this.frame >> 2) + e.id) % S.FIRE_FRAMES, s = e.size * TILE;
+          const big = e.hp < e.maxHp / 4, fr = (Math.floor(now / 66) + e.id) % S.FIRE_FRAMES, s = e.size * TILE;
           const flame = (f, isBig, x, y) => { const sp = S.fireSprite(f % S.FIRE_FRAMES, isBig); ctx.drawImage(sp, Math.round(x) - sp.ax, Math.round(y) - sp.ay); };
           // back to front so nearer flames overlap the ones behind
           if (big) flame(fr + 5, false, px + s * 0.72 + 8, py + s * 0.3);
@@ -205,7 +231,7 @@ export class Renderer {
       if (m.kind !== 'rock') ctx.rotate(Math.atan2((m.ty - m.sy) * TILE - Math.cos(t * Math.PI) * 10 * Math.PI, (m.tx - m.sx) * TILE));
       ctx.drawImage(sp, -sp.width / 2, -sp.height / 2); ctx.restore();
     }
-    for (const f of this.effects) if (f.k === 'boom' && f.t >= 0) ctx.drawImage(S.boomSprite(Math.min(4, (f.t / 3) | 0)), f.x * TILE - 8, f.y * TILE - 8);
+    for (const f of this.effects) if (f.k === 'boom' && f.t >= 0) ctx.drawImage(S.boomSprite(Math.min(4, Math.floor(f.t / 3))), f.x * TILE - 8, f.y * TILE - 8);
     // health bars for selected
     for (const e of list) if (!e.prop && sel.has(e.id) && e.type !== 'mine') this.hpBar(e, e._px, e._py);
     // rally point
@@ -229,7 +255,7 @@ export class Renderer {
       ctx.imageSmoothingEnabled = true; ctx.drawImage(this.fogCv, fx0 * TILE, fy0 * TILE, fw * TILE, fw * TILE); ctx.imageSmoothingEnabled = false;
     }
     // effects aging
-    for (const f of this.effects) f.t++;
+    for (const f of this.effects) f.t += dtf;
     this.effects = this.effects.filter(f => f.t < f.life);
     // drag box
     ctx.restore();
@@ -412,6 +438,7 @@ export class Renderer {
       if (b.hot) this.text(b.hot === 'Escape' ? 'Esc' : b.hot.toUpperCase(), x + 46, y + 28, '#fff', 9, 'right');
     });
     this.text('Menu (F10)', 88, 443, '#f0d878', 10, 'center');
+    if (ui.paused && !ui.banner) { this.text('PAUSED', VIEW.x + VIEW.w / 2, VIEW.y + 190, '#f0d878', 22, 'center', true, true); this.text('Press P to resume', VIEW.x + VIEW.w / 2, VIEW.y + 220, '#e0e0e0', 10, 'center', false); }
     // status line
     let status = '';
     const hb = ui.buttons.find(b => b.id === ui.hoverBtn);

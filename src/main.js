@@ -7,7 +7,7 @@ import * as sfx from './audio/sfx.js';
 import * as music from './audio/music.js';
 import * as speech from './audio/speech.js';
 import * as GA from './audio/game-audio.js';
-import { settings, setSetting, whenUnlocked } from './audio/core.js';
+import { settings, setSetting, whenUnlocked, holdAudio } from './audio/core.js';
 import { cursorSprite, prewarm, warmStep, stonePanel } from './sprites.js';
 
 const $ = (id) => document.getElementById(id);
@@ -162,13 +162,21 @@ function startGame(opts, mySlot, lob) {
 function addMsg(text) { ui.msgs.push({ text, t: performance.now() }); if (ui.msgs.length > 20) ui.msgs.shift(); }
 
 // ------------------------------------------------------------------ loop
-let last = performance.now(), acc = 0, alertT = 0;
+let last = performance.now(), acc = 0, alertT = 0, lastFrame = last, wasFrozen = false, frozenAt = 0, audioHeld = false;
+function isFrozen() { return running && paused && !!LS && !LS.online; }
 function loop(now) {
   requestAnimationFrame(loop);
   warmStep(running ? 4 : 8);
+  const fdt = Math.min(50, now - lastFrame); lastFrame = now;
+  // a paused single-player game is frozen completely: no simulation, no orders, no sound or music
+  const frozen = isFrozen();
+  if (frozen && !wasFrozen) frozenAt = now; wasFrozen = frozen;
+  const hold = frozen && $('p-sound').classList.contains('hidden') && now - frozenAt > 200; // (the sound settings screen still needs to be heard)
+  if (hold !== audioHeld) { audioHeld = hold; holdAudio(hold); }
   if (!running) { drawTitleBackdrop(now); return; }
   advance(now);
-  scroll();
+  scroll(fdt);
+  ui.paused = frozen && $('menu').classList.contains('hidden');
   updateHover();
   ui.netStatus = LS.online ? (LS.desync ? 'DESYNC!' : LS.waiting ? 'Waiting for players…' : '') : (paused ? 'PAUSED' : '');
   ui.selection = ui.selection.filter(id => { const e = game.get(id); return e && !e.hidden; });
@@ -231,7 +239,7 @@ function issue(cmd, kind = 'ack') { LS.issue(cmd); if (kind) GA.ordered(mySel(),
 let lastClick = 0;
 cv.addEventListener('contextmenu', e => e.preventDefault());
 cv.addEventListener('mousedown', e => {
-  if (!running) return;
+  if (!running || isFrozen()) return;
   const [x, y] = canvasPos(e); ui.mouse.x = x; ui.mouse.y = y; ui.mouseDown = true;
   // right or middle button: drag to slide the map; a right click that doesn't move is an order
   if (e.button === 1 || (e.button === 2 && inView(x, y) && !ui.mode)) { e.preventDefault(); ui.pan = { x, y, cx: R.cam.x, cy: R.cam.y, moved: e.button === 1, button: e.button }; return; }
@@ -357,6 +365,7 @@ window.addEventListener('keydown', e => {
   if (!$('menu').classList.contains('hidden')) { if (e.key === 'Escape' || e.key === 'F10') { e.preventDefault(); $('pz-resume').onclick(); } return; }
   keys.add(e.key);
   if (e.key === 'F10') { e.preventDefault(); openMenu(); return; }
+  if (isFrozen()) { if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') paused = false; if (!e.key.startsWith('Arrow')) return; }
   if (e.key === 'Enter') { chat.classList.remove('hidden'); chat.focus(); e.preventDefault(); return; }
   if (e.key === 'Escape') {
     if (ui.mode) { ui.mode = null; return; }
@@ -392,8 +401,8 @@ window.addEventListener('blur', () => keys.clear());
 
 function openMenu() { sfx.play('menu'); show('p-pause'); if (!LS.online) paused = true; }
 
-function scroll() {
-  const sp = 14; let dx = 0, dy = 0;
+function scroll(fdt) {
+  const sp = Math.round(14 * fdt / (1000 / 60)); let dx = 0, dy = 0;
   if (keys.has('ArrowLeft')) dx -= sp; if (keys.has('ArrowRight')) dx += sp; if (keys.has('ArrowUp')) dy -= sp; if (keys.has('ArrowDown')) dy += sp;
   if (document.hasFocus() && $('menu').classList.contains('hidden') && !ui.drag && !ui.pan) {
     const { x, y } = ui.mouse;

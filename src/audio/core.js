@@ -18,10 +18,14 @@ export const bus = {};
 let unlocked = false;
 const onUnlock = [];
 
+// freeze every sound (music included) while the game is paused
+let held = false;
+export function holdAudio(on) { held = on; if (ac) { if (on) ac.suspend(); else ac.resume(); } }
+
 export function whenUnlocked(fn) { if (unlocked) fn(); else onUnlock.push(fn); }
 
 export function ctx() {
-  if (ac) { if (ac.state === 'suspended') ac.resume(); return ac; }
+  if (ac) { if (ac.state === 'suspended' && !held) ac.resume(); return ac; }
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return null;
   ac = new AC({ latencyHint: 'interactive' });

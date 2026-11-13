@@ -526,14 +526,15 @@ export class Game {
     return best;
   }
 
-  nearestTree(x, y, maxR = 14, reg = 0) {
+  // reg: only trees reachable from that walkable region; forId: only trees with a free tile to stand on for that unit
+  nearestTree(x, y, maxR = 14, reg = 0, forId = 0) {
     for (let r = 0; r <= maxR; r++) {
       let best = null, bd = 1e9;
       for (let yy = y - r; yy <= y + r; yy++) for (let xx = x - r; xx <= x + r; xx++) {
         if (Math.max(Math.abs(xx - x), Math.abs(yy - y)) !== r) continue;
         if (!this.isTree(xx, yy)) continue;
         // must have a walkable neighbour
-        let ok = false; for (const [dx, dy] of DIRS) if (this.passable(xx + dx, yy + dy)) { ok = true; break; }
+        let ok = false; for (const [dx, dy] of DIRS) if (this.passable(xx + dx, yy + dy) && (!forId || !this.uocc[this.idx(xx + dx, yy + dy)] || this.uocc[this.idx(xx + dx, yy + dy)] === forId)) { ok = true; break; }
         if (!ok || (reg && !this.touches(reg, xx, yy, 1))) continue;
         const d = (xx - x) * (xx - x) + (yy - y) * (yy - y);
         if (d < bd) { bd = d; best = [xx, yy]; }
@@ -664,7 +665,7 @@ export class Game {
       let dep = o.depot ? this.get(o.depot) : null;
       if (!dep || !dep.built || dep.owner !== u.owner) { dep = this.nearestDepot(u, u.carryKind); o.depot = dep ? dep.id : 0; }
       if (!dep) { u.order = null; return; }
-      const r = this.moveToward(u, dep.x, dep.y, dep.size, 1);
+      const r = this.moveToward(u, dep.x, dep.y, dep.size, 1, true);
       if (r === 'arrived' && u.mp === 0) {
         const P = this.players[u.owner];
         if (u.carryKind === 'gold') { P.gold += u.carry; P.goldMined += u.carry; } else { P.wood += u.carry; P.woodCut += u.carry; }
@@ -681,21 +682,21 @@ export class Game {
       const m = this.get(o.mine); if (!m) { u.order = null; return; }
       if (o.phase === 'go') {
         if (!this.touches(this.regionAt(u.x, u.y), m.x, m.y, m.size)) { u.order = null; return; }
-        const r = this.moveToward(u, m.x, m.y, m.size, 1);
-        if (r === 'arrived' && u.mp === 0) { this.hide(u, m); u.timer = MINE_TIME; }
-        else if (r === 'stuck') u.order = null;
+        const r = this.moveToward(u, m.x, m.y, m.size, 1, true);
+        if (r === 'arrived' && u.mp === 0) { this.hide(u, m); u.timer = MINE_TIME; o.fails = 0; }
+        else if (r === 'stuck' && (o.fails = (o.fails || 0) + 1) > 6) u.order = null; // a crowded entrance clears; a walled-off mine doesn't
       }
     } else {
       if (o.phase === 'go') {
         const reg = this.regionAt(u.x, u.y);
         if (!this.isTree(o.tx, o.ty) || !this.touches(reg, o.tx, o.ty, 1)) {
-          const t = this.nearestTree(o.tx, o.ty, 14, reg); if (!t) { u.order = null; this.emit({ t: 'msg', p: u.owner, text: 'No trees nearby', code: 'noTrees' }); return; }
+          const t = this.nearestTree(o.tx, o.ty, 14, reg, u.id) || this.nearestTree(o.tx, o.ty, 14, reg); if (!t) { u.order = null; this.emit({ t: 'msg', p: u.owner, text: 'No trees nearby', code: 'noTrees' }); return; }
           o.tx = t[0]; o.ty = t[1]; u.path = null;
         }
-        const r = this.moveToward(u, o.tx, o.ty, 1, 1);
+        const r = this.moveToward(u, o.tx, o.ty, 1, 1, true);
         if (r === 'arrived' && u.mp === 0) { o.phase = 'chop'; u.timer = CHOP_TIME; const dx = o.tx - u.x; if (dx) u.facing = dx > 0 ? 1 : -1; }
-        else if (r === 'stuck') { // choose a different tree
-          const t = this.nearestTree(u.x, u.y, 10, reg); if (t && (t[0] !== o.tx || t[1] !== o.ty)) { o.tx = t[0]; o.ty = t[1]; u.path = null; } else u.order = null;
+        else if (r === 'stuck') { // every spot by this tree is taken: choose one with room
+          const t = this.nearestTree(u.x, u.y, 12, reg, u.id); if (t && (t[0] !== o.tx || t[1] !== o.ty)) { o.tx = t[0]; o.ty = t[1]; u.path = null; } else u.order = null;
         }
       } else if (o.phase === 'chop') {
         if (!this.isTree(o.tx, o.ty)) { o.phase = 'go'; return; }
