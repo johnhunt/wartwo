@@ -240,6 +240,10 @@ function iconModel(name) {
       P.push(sph([0, 7, -3], [4.6, 1.6, 4.6], mat('gold', 2, 7, { spec: 0.6, tex: (lp) => (Math.abs(lp[0]) < 1 && Math.abs(lp[2]) < 3 ? -0.5 : 0) })));
       for (const [x, z] of [[-10, -11], [-5, -12.4], [9, -11.6], [12, -9]]) P.push(sph([x, 4, z], [2.4, 2.2, 1.4], I_GOLD));
       break;
+    case 'repair': // hammer over a pair of patched planks
+      P.push(cap([-11, 0, -6], [3, 0, 9], 1.5, I_WOOD), box([5, 0, 11], [4, 3.6, 6.4], I_STEEL, rot(0, 0, 40)));
+      P.push(box([3, 3, -9], [13, 1.4, 2.4], I_WOOD, rot(0, 0, -7)), box([4, 3, -14.5], [12, 1.4, 2.2], I_WOOD, rot(0, 0, 5)), box([6, 4.6, -12], [2.2, 0.8, 5.6], I_STEEL));
+      break;
     case 'build': case 'build2':
       P.push(cap([-10, 0, -12], [4, 0, 6], 1.5, I_WOOD), box([6, 0, 8.6], [4, 3.6, 7.4], I_STEEL, rot(0, 0, 38)));
       if (name === 'build2') { P.push(slab([9, 2, -13], [7, 4, 3], mat('stone', 2, 8, { tex: TEX.brick(6, 3) })), slab([10, 2, -7], [4, 3, 2], mat('stone', 2, 8)), fru([-10, 2, 4], 2.6, 0, 6, I_GOLD), fru([-10, 2, 2], 2.6, 2.6, 2, I_GOLD)); }

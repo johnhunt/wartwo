@@ -12,9 +12,9 @@ const BUILD_PLAN = [
 
 // Difficulty (player.level: 0 easy, 1 normal, 2 hard). Integers only: this runs inside the lockstep sim.
 const LEVELS = [
-  { workers: 7, grow: 3, trainGap: 320, firstWave: 7200, waveGap: 2000, wave0: 5, barracks: 2, expandAt: 4000 },
-  { workers: 9, grow: 6, trainGap: 0, firstWave: 0, waveGap: 600, wave0: 6, barracks: 3, expandAt: 10000 },
-  { workers: 11, grow: 7, trainGap: 0, firstWave: 0, waveGap: 450, wave0: 6, barracks: 4, expandAt: 16000 },
+  { workers: 6, grow: 3, trainGap: 400, firstWave: 9600, waveGap: 2400, wave0: 4, waveMax: 8, barracks: 1, expandAt: 4000 },
+  { workers: 9, grow: 6, trainGap: 120, firstWave: 4800, waveGap: 1200, wave0: 6, waveMax: 16, barracks: 2, expandAt: 10000 },
+  { workers: 11, grow: 7, trainGap: 0, firstWave: 0, waveGap: 500, wave0: 6, waveMax: 22, barracks: 4, expandAt: 16000 },
 ];
 
 function cmd(g, p, c) { c.p = p.id; g.exec(c); }
@@ -144,16 +144,22 @@ export function aiTick(g, p) {
       if (idle.length) cmd(g, p, { t: 'amove', ids: idle.map(a => a.id), x: threat.x, y: threat.y });
       return;
     }
+    // quiet at home: patch up damaged buildings, one worker at a time
+    if (!workers.some(w => w.order && w.order.type === 'repair') && p.gold > 300 && p.wood > 150) {
+      const hurt = blds.find(b => b.built && b.hp < b.maxHp - (b.maxHp >> 2));
+      const fixer = hurt && workers.find(w => free(w) && w.order.kind === 'wood');
+      if (fixer) cmd(g, p, { t: 'repair', ids: [fixer.id], target: hurt.id });
+    }
   }
 
   // --- attack waves
   const home = hall ? idleArmy.filter(a => !away.includes(a)) : [];
-  const need = Math.min(L.wave0 + st.wave * 3, 22);
+  const need = Math.min(L.wave0 + st.wave * 3, L.waveMax);
   if (home.length && since > L.waveGap && g.tick >= L.firstWave && (home.length >= need || broke || (since > 3600 && home.length >= 4))) {
     const target = pickTarget(g, p, hall);
     if (target) {
       st.wave++; st.lastAttack = g.tick;
-      cmd(g, p, { t: 'amove', ids: home.map(a => a.id), x: target.x, y: target.y });
+      cmd(g, p, { t: 'amove', ids: home.slice(0, L.waveMax + 4).map(a => a.id), x: target.x, y: target.y });
     }
   } else if (broke && !army.length && since > 1200 && !blds.some(b => b.train.length)) {
     // nothing left to fight with and nothing to buy: the workers make a last stand rather than stall forever

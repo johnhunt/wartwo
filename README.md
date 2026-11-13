@@ -69,12 +69,13 @@ online games too.
 | Input | Action |
 |---|---|
 | Left click / drag | Select / box-select (Shift adds, double-click selects all of that type on screen) |
-| Right click | Smart order: move, attack, harvest, return goods, set rally point |
+| Right click | Smart order: move, attack, harvest, return goods, repair a damaged building, set rally point |
 | A / M / S / H | Attack (or attack-move), move, stop, stand ground |
 | G / R | Harvest, return goods |
 | B / V | Basic / advanced building menu, then use the hotkeys shown on the buttons |
 | Ctrl+1–9, 1–9 | Assign / recall a control group (press twice to centre the view) |
-| Arrows / screen edge | Scroll |
+| Right or middle drag, mouse wheel, arrows, screen edge | Move the map |
+| E | Repair (workers) |
 | Space | Jump to the last alert |
 | Tab | Select the next idle worker |
 | Enter | Chat |

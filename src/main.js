@@ -11,7 +11,8 @@ import { settings, setSetting, whenUnlocked } from './audio/core.js';
 import { cursorSprite, prewarm, warmStep, stonePanel } from './sprites.js';
 
 const $ = (id) => document.getElementById(id);
-const cv = $('screen');
+const cv = $('screen'), overlay = $('overlay');
+Renderer.overlay = overlay;
 let game = null, R = null, LS = null, lobby = null, running = false, paused = false;
 let ui = null;
 
@@ -19,8 +20,13 @@ let ui = null;
 function fit() {
   const s = Math.max(1, Math.min(window.innerWidth / 640, window.innerHeight / 480));
   const k = s >= 2 ? Math.floor(s) : s; // integer scale when big enough
-  cv.style.width = (640 * k) + 'px'; cv.style.height = (480 * k) + 'px';
+  cv.style.width = overlay.style.width = (640 * k) + 'px'; cv.style.height = overlay.style.height = (480 * k) + 'px';
+  // the text overlay is backed by real device pixels
+  const dpr = window.devicePixelRatio || 1;
+  overlay.width = Math.max(640, Math.round(640 * k * dpr)); overlay.height = Math.round(overlay.width * 0.75);
 }
+function toggleFullscreen() { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.().catch(() => {}); }
+$('b-full').onclick = $('pz-full').onclick = () => { sfx.play('click'); toggleFullscreen(); };
 window.addEventListener('resize', fit); fit();
 
 // menus share the in-game carved stone texture
@@ -33,7 +39,7 @@ const store = { get(k, d) { try { return localStorage.getItem('wartwo.' + k) ?? 
 const defaultName = store.get('name', 'Commander' + Math.floor(Math.random() * 900 + 100));
 $('sp-name').value = $('mp-name').value = defaultName;
 $('sp-faction').value = $('mp-faction').value = store.get('faction', '0');
-$('sp-level').value = store.get('level', '1');
+$('sp-level').value = store.get('level', '0');
 $('sp-seed').value = Math.floor(Math.random() * 99999);
 $('mp-title').value = defaultName + "'s battle";
 
@@ -167,7 +173,7 @@ function loop(now) {
   ui.netStatus = LS.online ? (LS.desync ? 'DESYNC!' : LS.waiting ? 'Waiting for players…' : '') : (paused ? 'PAUSED' : '');
   ui.selection = ui.selection.filter(id => { const e = game.get(id); return e && !e.hidden; });
   if (ui.mode === 'place') ui.placeAt = placeTile();
-  GA.ambience(now);
+  if (!paused || LS.online) GA.ambience(now); // a paused world is a silent one
   R.draw(Math.min(1, acc / TICK_MS), ui);
   drawCursor();
 }
@@ -227,6 +233,8 @@ cv.addEventListener('contextmenu', e => e.preventDefault());
 cv.addEventListener('mousedown', e => {
   if (!running) return;
   const [x, y] = canvasPos(e); ui.mouse.x = x; ui.mouse.y = y; ui.mouseDown = true;
+  // right or middle button: drag to slide the map; a right click that doesn't move is an order
+  if (e.button === 1 || (e.button === 2 && inView(x, y) && !ui.mode)) { e.preventDefault(); ui.pan = { x, y, cx: R.cam.x, cy: R.cam.y, moved: e.button === 1, button: e.button }; return; }
   if (e.button === 2) { rightClick(x, y); return; }
   if (e.button !== 0) return;
   if (x >= 8 && x < 168 && y >= 440 && y < 458) { openMenu(); return; }
@@ -250,18 +258,31 @@ cv.addEventListener('mousedown', e => {
 window.addEventListener('mousemove', e => {
   if (!running) return;
   const [x, y] = canvasPos(e); ui.mouse.x = x; ui.mouse.y = y; ui.mouse.inView = inView(x, y);
+  if (ui.pan) {
+    const p = ui.pan; if (Math.abs(x - p.x) + Math.abs(y - p.y) > 5) p.moved = true;
+    if (p.moved) { R.cam.x = p.cx - (x - p.x); R.cam.y = p.cy - (y - p.y); R.clampCam(); }
+  }
   if (ui.miniDrag) { const [tx, ty] = miniToTile(Math.max(MINI.x, Math.min(MINI.x + MINI.s - 1, x)), Math.max(MINI.y, Math.min(MINI.y + MINI.s - 1, y))); R.centerOn(tx * TILE, ty * TILE); }
   if (ui.drag) { ui.drag.x1 = Math.max(VIEW.x, Math.min(VIEW.x + VIEW.w - 1, x)); ui.drag.y1 = Math.max(VIEW.y, Math.min(VIEW.y + VIEW.h - 1, y)); if (Math.abs(ui.drag.x1 - ui.drag.x0) + Math.abs(ui.drag.y1 - ui.drag.y0) > 5) ui.drag.active = true; }
 });
 window.addEventListener('mouseup', e => {
   if (!running) return;
   ui.mouseDown = false; ui.miniDrag = false;
+  if (ui.pan && e.button === ui.pan.button) { const p = ui.pan; ui.pan = null; if (!p.moved) rightClick(p.x, p.y); return; }
   if (e.button !== 0 || !ui.drag) return;
   const d = ui.drag; ui.drag = null;
   if (d.active) boxSelect(d);
   else clickSelect(d.x0, d.y0, d.shift, performance.now() - lastClick < 350 || d.ctrl);
   lastClick = performance.now();
 });
+
+// mouse wheel / two-finger trackpad scroll slides the map
+cv.addEventListener('wheel', e => {
+  if (!running || !R) return; e.preventDefault();
+  const r = cv.getBoundingClientRect(), k = (e.deltaMode === 1 ? 24 : 1) * 640 / r.width;
+  R.cam.x += (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * k; R.cam.y += (e.shiftKey && !e.deltaX ? 0 : e.deltaY) * k; R.clampCam();
+}, { passive: false });
+cv.addEventListener('auxclick', e => e.preventDefault());
 
 function boxSelect(d) {
   const [ax, ay] = R.screenToWorld(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1));
@@ -293,7 +314,7 @@ function rightClick(x, y) {
   else return;
   const sel = mySel(); if (!sel.length) return;
   const enemy = t && t.owner >= 0 && t.owner !== LS.mySlot && game.enemies(LS.mySlot, t.owner);
-  const harvest = (t && t.type === 'mine') || (!t && game.isTree(tx, ty));
+  const harvest = (t && t.type === 'mine') || (!t && game.isTree(tx, ty)) || (game.canRepair(LS.mySlot, t) && sel.some(e => e.unit && UNITS[e.type].worker));
   issue({ t: 'smart', ids: sel.map(e => e.id), x: tx, y: ty, target: t ? t.id : 0 }, enemy ? 'attack' : harvest ? 'work' : 'ack');
   ui.marker = { x: tx * TILE + 16, y: ty * TILE + 16, t: 16, color: enemy ? '#f33' : '#3f3' };
 }
@@ -303,6 +324,7 @@ function targetAt(tx, ty, t, shift) {
   const kind = ui.targetKind;
   if (kind === 'move') issue({ t: 'move', ids, x: tx, y: ty });
   else if (kind === 'attack') { if (t && t.owner !== LS.mySlot && t.type !== 'mine') issue({ t: 'attack', ids, target: t.id }, 'attack'); else issue({ t: 'amove', ids, x: tx, y: ty }, 'attack'); }
+  else if (kind === 'repair') { if (game.canRepair(LS.mySlot, t)) issue({ t: 'repair', ids, target: t.id }, 'work'); else { sfx.play('error'); addMsg('Choose one of your damaged buildings.'); return; } }
   else if (kind === 'gather') { if (t && t.type === 'mine') issue({ t: 'gather', ids, target: t.id }, 'work'); else if (game.isTree(tx, ty)) issue({ t: 'gather', ids, x: tx, y: ty }, 'work'); else { sfx.play('error'); addMsg('Choose a gold mine or a tree.'); return; } }
   ui.marker = { x: tx * TILE + 16, y: ty * TILE + 16, t: 16, color: kind === 'attack' ? '#f33' : '#3f3' };
   if (!shift) ui.mode = null;
@@ -373,7 +395,7 @@ function openMenu() { sfx.play('menu'); show('p-pause'); if (!LS.online) paused 
 function scroll() {
   const sp = 14; let dx = 0, dy = 0;
   if (keys.has('ArrowLeft')) dx -= sp; if (keys.has('ArrowRight')) dx += sp; if (keys.has('ArrowUp')) dy -= sp; if (keys.has('ArrowDown')) dy += sp;
-  if (document.hasFocus() && $('menu').classList.contains('hidden') && !ui.drag) {
+  if (document.hasFocus() && $('menu').classList.contains('hidden') && !ui.drag && !ui.pan) {
     const { x, y } = ui.mouse;
     if (x <= 2) dx -= sp; if (x >= 637) dx += sp; if (y <= 2) dy -= sp; if (y >= 477) dy += sp;
   }
@@ -382,7 +404,8 @@ function scroll() {
 
 // ------------------------------------------------------------------ cursor
 function drawCursor() {
-  const ctx = cv.getContext('2d'); const { x, y } = ui.mouse;
+  const ctx = overlay.getContext('2d'), k = overlay.width / 640; const { x, y } = ui.mouse;
+  ctx.setTransform(k, 0, 0, k, 0, 0); ctx.imageSmoothingEnabled = false;
   if (ui.mode === 'target' && inView(x, y) || ui.mode === 'target' && inMini(x, y)) {
     ctx.strokeStyle = ui.targetKind === 'attack' ? '#ff4040' : '#f0d878'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, 6, 0, Math.PI * 2); ctx.moveTo(x - 9, y + 0.5); ctx.lineTo(x - 3, y + 0.5); ctx.moveTo(x + 4, y + 0.5); ctx.lineTo(x + 10, y + 0.5); ctx.moveTo(x + 0.5, y - 9); ctx.lineTo(x + 0.5, y - 3); ctx.moveTo(x + 0.5, y + 4); ctx.lineTo(x + 0.5, y + 10); ctx.stroke();

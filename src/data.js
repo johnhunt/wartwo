@@ -69,6 +69,8 @@ export const TREE_WOOD = 100;
 export const CARRY = 100;
 export const MINE_TIME = 90;   // ticks inside mine
 export const CHOP_TIME = 70;   // ticks chopping
+// repairing: every REPAIR_TICKS a worker restores REPAIR_HP for a little gold and lumber
+export const REPAIR_TICKS = 5, REPAIR_HP = 5, REPAIR_GOLD = 2, REPAIR_WOOD = 1;
 export const MAX_SELECT = 9;
 export const QUEUE_MAX = 5;
 

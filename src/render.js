@@ -19,7 +19,7 @@ export class Renderer {
     const N = game.w * game.h;
     this.explored = new Uint8Array(N); this.visible = new Uint8Array(N);
     this.chunks = new Map();
-    this.effects = []; this.frame = 0; this.revealAll = false;
+    this.effects = []; this.texts = []; this.frame = 0; this.revealAll = false;
     const l0 = S.lut(0);
     this.waterPat = []; for (let f = 0; f < WATER_FRAMES; f++) this.waterPat.push(this.ctx.createPattern(waterFrame(f).toCanvas(l0), 'repeat'));
     this.trees = [0, 1, 2, 3, 4, 5].map(v => treeClump(v).toCanvas(l0));
@@ -146,6 +146,15 @@ export class Renderer {
       list.push(e);
     }
     const posOf = (e) => {
+      if (e.unit && e.mp <= 0) {
+        // melee fighters lean in on whatever they are hitting, so blows visibly connect
+        const o = e.order, t = o && UNITS[e.type].range === 1 && (e.cd > 0 || e.anim > 0) ? g.get(o.type === 'attack' ? o.target : o.sub) : null;
+        if (t && g.distEnt(e, t) <= 1) {
+          const dx = Math.sign(Math.max(t.x, Math.min(t.x + t.size - 1, e.x)) - e.x), dy = Math.sign(Math.max(t.y, Math.min(t.y + t.size - 1, e.y)) - e.y);
+          const m = (e.anim > 6 ? 5 : e.anim > 2 ? 9 : 5) * (dx && dy ? 0.75 : 1) * (t.unit ? 1 : 0.6);
+          return [e.x * TILE + dx * m, e.y * TILE + dy * m * 0.8];
+        }
+      }
       if (!e.unit || e.mp <= 0) return [e.x * TILE, e.y * TILE];
       const f = Math.max(0, Math.min(1, (e.mp - alpha) / e.mt));
       return [(e.x - (e.x - e.px) * f) * TILE, (e.y - (e.y - e.py) * f) * TILE];
@@ -235,6 +244,7 @@ export class Renderer {
       ctx.strokeStyle = ui.marker.color; ctx.beginPath(); ctx.ellipse(mx, my, r + 2, (r + 2) / 2, 0, 0, Math.PI * 2); ctx.stroke();
     }
     this.drawHUD(ui);
+    this.flushText();
   }
 
   // 8-way facing, tracked on the render side only (0 = towards the viewer, clockwise)
@@ -243,7 +253,7 @@ export class Renderer {
     if (e.mp > 0) { dx = e.x - e.px; dy = e.y - e.py; }
     else {
       const o = e.order; let t = null;
-      if (o && (o.type === 'attack' || o.type === 'resume') && o.target && (e.anim > 0 || !e.path)) t = g.get(o.target);
+      if (o && (o.type === 'attack' || o.type === 'repair') && o.target && (e.anim > 0 || !e.path)) t = g.get(o.target);
       if (t) { dx = t.x + (t.size - 1) / 2 - e.x; dy = t.y + (t.size - 1) / 2 - e.y; }
       else if (o && o.type === 'gather' && o.phase === 'chop') { dx = o.tx - e.x; dy = o.ty - e.y; }
     }
@@ -290,8 +300,22 @@ export class Renderer {
 
   // ------------------------------------------------------------ HUD
   text(s, x, y, col = '#f0d878', size = 10, align = 'left', bold = true, serif = false) {
-    const ctx = this.ctx; ctx.font = `${bold ? 'bold ' : ''}${size}px ${serif ? 'Georgia, "Times New Roman", serif' : '"Trebuchet MS", Verdana, sans-serif'}`; ctx.textAlign = align; ctx.textBaseline = 'top';
-    ctx.fillStyle = '#000'; ctx.fillText(s, x + 1, y + 1); ctx.fillText(s, x - 1, y); ctx.fillText(s, x, y - 1); ctx.fillStyle = col; ctx.fillText(s, x, y);
+    if (s !== '' && s != null) this.texts.push({ s: String(s), x, y, col, size, align, bold, serif });
+  }
+  // Text is drawn last, at the display's real resolution on the overlay canvas, so it stays sharp
+  // however far the 640x480 picture is scaled up. Without an overlay it falls back to the game canvas.
+  flushText() {
+    const ov = Renderer.overlay, ctx = ov ? ov.getContext('2d') : this.ctx, k = ov ? ov.width / 640 : 1;
+    if (ov) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, ov.width, ov.height); }
+    ctx.textBaseline = 'top'; ctx.lineJoin = 'round';
+    for (const t of this.texts) {
+      ctx.font = `${t.bold ? 'bold ' : ''}${t.size * k}px ${t.serif ? 'Georgia, "Times New Roman", serif' : '"Trebuchet MS", Verdana, sans-serif'}`; ctx.textAlign = t.align;
+      const x = Math.round(t.x * k), y = Math.round(t.y * k);
+      ctx.fillStyle = 'rgba(0,0,0,.85)'; ctx.fillText(t.s, x + k, y + k);
+      ctx.strokeStyle = '#000'; ctx.lineWidth = Math.max(2, 2 * k); ctx.strokeText(t.s, x, y);
+      ctx.fillStyle = t.col; ctx.fillText(t.s, x, y);
+    }
+    this.texts.length = 0;
   }
   bevel(x, y, w, h, inset) {
     const ctx = this.ctx; ctx.fillStyle = inset ? '#1a1410' : '#b8a488'; ctx.fillRect(x, y, w, 1); ctx.fillRect(x, y, 1, h);
@@ -467,6 +491,7 @@ export class Renderer {
         B.push({ id: 'hold', icon: S.cmdIcon('hold', team), label: 'Stand ground', hot: 'h', act: { k: 'cmd', t: 'hold' } });
         B.push({ id: 'build', icon: S.cmdIcon('build', team), label: 'Build basic structure', hot: 'b', act: { k: 'menu', menu: 'build' } });
         B.push({ id: 'build2', icon: S.cmdIcon('build2', team), label: 'Build advanced structure', hot: 'v', act: { k: 'menu', menu: 'build2' } });
+        B.push({ id: 'repair', icon: S.cmdIcon('repair', team), label: 'Repair a building (or right-click it)', hot: 'e', act: { k: 'target', t: 'repair' } });
       } else {
         B.push({ id: 'hold', icon: S.cmdIcon('hold', team), label: 'Stand ground', hot: 'h', act: { k: 'cmd', t: 'hold' } });
       }

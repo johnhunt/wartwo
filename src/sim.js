@@ -1,5 +1,5 @@
 // Deterministic lockstep simulation. Integer math only (no trig, no Math.random).
-import { UNITS, BUILDINGS, def, START_GOLD, START_WOOD, MINE_GOLD, CARRY, MINE_TIME, CHOP_TIME, QUEUE_MAX, MAX_SELECT, TPS } from './data.js';
+import { REPAIR_TICKS, REPAIR_HP, REPAIR_GOLD, REPAIR_WOOD, UNITS, BUILDINGS, def, START_GOLD, START_WOOD, MINE_GOLD, CARRY, MINE_TIME, CHOP_TIME, QUEUE_MAX, MAX_SELECT, TPS } from './data.js';
 import { generateMap, rng, T_GRASS, T_FOREST, T_WATER, T_ROCK, T_DIRT, T_STUMP } from './map.js';
 import { aiTick, aiInit } from './ai.js';
 
@@ -121,7 +121,7 @@ export class Game {
         const ni = ny * W + nx;
         if (pf.closed[ni] === gen) continue;
         if (!this.walkableTerrain(nx, ny) || this.bocc[ni]) continue;
-        if (avoidUnits && this.uocc[ni] && this.uocc[ni] !== selfId && this.distRect(nx, ny, sx, sy, 1) <= 4) continue;
+        if (avoidUnits && this.uocc[ni] && this.uocc[ni] !== selfId && this.distRect(nx, ny, sx, sy, 1) <= 7) { const ob = this.byId.get(this.uocc[ni]); if (ob && ob.mp === 0 && !ob.path) continue; } // route around units that are standing still
         if (d >= 4) { // no corner cutting
           if (!this.passable(cx + DIRS[d][0], cy) || !this.passable(cx, cy + DIRS[d][1])) continue;
         }
@@ -139,13 +139,13 @@ export class Game {
   }
 
   // Move unit toward square rect within range. Returns 'arrived' | 'moving' | 'stuck'
-  moveToward(u, gx, gy, gs, range) {
+  // strict: only being truly in range counts (fighting, building); otherwise a crowded destination is 'close enough'
+  moveToward(u, gx, gy, gs, range, strict) {
     if (this.distRect(u.x, u.y, gx, gy, gs) <= range) { u.path = null; return 'arrived'; }
     if (u.mp > 0) return 'moving';
     const goalKey = gx * 100003 + gy * 31 + gs * 7 + range;
     if (!u.path || u.goalKey !== goalKey || u.pi >= u.path.length) {
-      if (u.path && u.goalKey === goalKey && u.pi >= u.path.length && u.path.length === 0) { /* fallthrough */ }
-      u.path = this.findPath(u.x, u.y, gx, gy, gs, range, u.wait > 4, u.id); u.pi = 0; u.goalKey = goalKey;
+      u.path = this.findPath(u.x, u.y, gx, gy, gs, range, u.wait >= 2, u.id); u.pi = 0; u.goalKey = goalKey;
       if (u.path.length === 0) { u.stuck = (u.stuck || 0) + 1; return u.stuck > 3 ? 'stuck' : 'moving'; }
     }
     const n = u.path[u.pi], nx = n % this.w, ny = (n / this.w) | 0;
@@ -154,22 +154,44 @@ export class Game {
     if (occ && occ !== u.id) {
       u.wait++;
       const other = this.get(occ);
+      if (other && other.mp === 0 && !this.enemies(u.owner, other.owner)) {
+        // two friends walking into each other simply trade places
+        if (other.path && other.pi < other.path.length && other.path[other.pi] === this.idx(u.x, u.y)) { this.stepTo(other, u.x, u.y); other.pi++; other.wait = 0; this.stepTo(u, nx, ny); u.pi++; u.wait = 0; u.stuck = 0; return 'moving'; }
+        // an idle friend in the way steps aside
+        if (!other.order && other.owner === u.owner && u.wait === 1) this.nudge(other, u);
+      }
+      const still = other && other.mp === 0 && !other.path;
       // close to goal and blocked by a stationary unit: good enough
-      if (other && other.mp === 0 && !other.path && this.distRect(u.x, u.y, gx, gy, gs) <= range + 2 && u.wait > 3) { u.path = null; u.wait = 0; return 'arrived'; }
-      if (u.wait === 5 || u.wait === 15 || u.wait === 30) u.path = null; // repath avoiding units
+      if (!strict && still && this.distRect(u.x, u.y, gx, gy, gs) <= range + 2 && u.wait > 3) { u.path = null; u.wait = 0; return 'arrived'; }
+      // look for a way round: at once if the blocker is standing still, after a moment if it is on the move
+      if (still ? (u.wait === 2 || u.wait % 10 === 0) : (u.wait === 6 || u.wait % 12 === 0)) u.path = null;
       if (u.wait > 45) { u.wait = 0; u.path = null; return 'stuck'; }
       return 'moving';
     }
     // step
+    this.uocc[this.idx(u.x, u.y)] = 0;
+    this.stepTo(u, nx, ny);
+    u.pi++; u.wait = 0; u.stuck = 0;
+    return 'moving';
+  }
+  stepTo(u, nx, ny) {
     const dx = nx - u.x, dy = ny - u.y;
-    this.uocc[this.idx(u.x, u.y)] = 0; this.uocc[n] = u.id;
+    this.uocc[this.idx(nx, ny)] = u.id;
     u.px = u.x; u.py = u.y; u.x = nx; u.y = ny;
     const sp = UNITS[u.type].speed;
     u.mt = u.mp = (dx && dy) ? ((sp * 14 / 10) | 0) : sp;
     if (dx) u.facing = dx;
     u.dir = dy < 0 ? 0 : dy > 0 ? 2 : 1;
-    u.pi++; u.wait = 0; u.stuck = 0;
-    return 'moving';
+  }
+  // ask an idle unit to move off its tile, away from whoever wants through
+  nudge(o, from) {
+    let best = null, bd = -1;
+    for (const [dx, dy] of DIRS) {
+      const x = o.x + dx, y = o.y + dy; if (!this.free(x, y)) continue;
+      if (dx && dy && (!this.passable(o.x + dx, o.y) || !this.passable(o.x, o.y + dy))) continue;
+      const d = (x - from.x) * (x - from.x) + (y - from.y) * (y - from.y); if (d > bd) { bd = d; best = [x, y]; }
+    }
+    if (best) this.setOrder(o, { type: 'move', x: best[0], y: best[1] });
   }
 
   // ---------------------------------------------------------------- commands
@@ -201,6 +223,11 @@ export class Game {
       case 'hold': for (const u of own) if (u.unit) this.setOrder(u, { type: 'hold' }); break;
       case 'gather': {
         for (const u of own) if (u.unit && UNITS[u.type].worker) this.orderGather(u, cmd.target, cmd.x, cmd.y);
+        break;
+      }
+      case 'repair': {
+        const t = this.get(cmd.target); if (!this.canRepair(cmd.p, t)) break;
+        for (const u of own) if (u.unit && UNITS[u.type].worker) this.setOrder(u, { type: 'repair', target: t.id });
         break;
       }
       case 'ret': for (const u of own) if (u.unit && u.carry) this.setOrder(u, { type: 'gather', kind: u.carryKind, phase: 'ret', mine: u.lastMine, tx: u.lastTx, ty: u.lastTy }); break;
@@ -241,6 +268,8 @@ export class Game {
     }
   }
 
+  canRepair(p, t) { return !!t && !t.unit && t.built && t.owner >= 0 && t.hp < t.maxHp && !this.enemies(p, t.owner); }
+
   queued(p) { let n = 0; for (const e of this.ents) if (e.owner === p && !e.unit && !e.dead) n += e.train.length; return n; }
 
   formation(cx, cy, n) {
@@ -267,7 +296,7 @@ export class Game {
       if (t && t.type === 'mine') this.orderGather(u, t.id);
       else if (!t && tree) this.orderGather(u, 0, cmd.x, cmd.y);
       else if (t && t.owner === p && !t.unit && u.carry && BUILDINGS[t.type].depot && BUILDINGS[t.type].depot.includes(u.carryKind) && t.built) this.setOrder(u, { type: 'gather', kind: u.carryKind, phase: 'ret', depot: t.id, mine: u.lastMine, tx: u.lastTx, ty: u.lastTy });
-      else if (t && t.owner === p && !t.unit && !t.built) this.setOrder(u, { type: 'resume', target: t.id });
+      else if (this.canRepair(p, t)) this.setOrder(u, { type: 'repair', target: t.id });
       else if (t && this.enemies(p, t.owner)) this.setOrder(u, { type: 'attack', target: t.id });
       else this.setOrder(u, { type: 'move', x: cmd.x, y: cmd.y });
     }
@@ -373,17 +402,21 @@ export class Game {
       if (b.cd > 0) b.cd--;
       if ((this.tick + b.id) % 4 === 0 || (b.target && !this.get(b.target))) {
         const tg = b.target ? this.get(b.target) : null;
-        if (!tg || this.distEnt(b, tg) > d.attack.range) b.target = this.findEnemy(b, d.attack.range, true)?.id || 0;
+        if (!tg || this.distEnt(b, tg) > d.attack.range) b.target = this.findEnemy(b, d.attack.range)?.id || 0;
       }
       const tg = b.target ? this.get(b.target) : null;
       if (tg && b.cd === 0 && this.distEnt(b, tg) <= d.attack.range) { this.doAttack(b, tg, d.attack); }
     }
   }
 
-  findEnemy(e, range, unitsFirst) {
+  // something that can hurt us (soldiers, towers) as opposed to workers and plain buildings
+  isThreat(o) { return o.unit ? !UNITS[o.type].worker : this.canAttack(o); }
+  findEnemy(e, range, threatsOnly) {
     let best = null, bd = 1e9;
+    const skip = e.skipUntil > this.tick ? e.skipId : 0;
     for (const o of this.ents) {
-      if (o.dead || o.hidden || o.owner < 0 || !this.enemies(e.owner, o.owner)) continue;
+      if (o.dead || o.hidden || o.owner < 0 || o.id === skip || !this.enemies(e.owner, o.owner)) continue;
+      if (threatsOnly && !this.isThreat(o)) continue;
       const d = this.distEnt(e, o); if (d > range) continue;
       // prefer things that fight back, then units, then buildings
       const score = d * 10 + (o.unit ? (this.canAttack(o) && !UNITS[o.type].worker ? 0 : 30) : (this.canAttack(o) ? 20 : 200));
@@ -519,12 +552,17 @@ export class Game {
     let o = u.order;
     // auto acquire
     if ((!o || o.type === 'amove' || o.type === 'hold') && !d.worker && (this.tick + u.id) % 5 === 0) {
-      const en = this.findEnemy(u, o && o.type === 'hold' ? d.range : d.sight, true);
+      const en = this.findEnemy(u, o && o.type === 'hold' ? d.range : d.sight);
       if (en) {
         if (!o) { u.order = o = { type: 'attack', target: en.id, auto: true, hx: u.x, hy: u.y }; u.path = null; }
         else if (o.type === 'amove' && !o.sub) { o.sub = en.id; u.path = null; }
         else if (o.type === 'hold') o.sub = en.id;
       }
+    }
+    // busy knocking down a building or chasing a worker while soldiers or towers are in sight: deal with those first
+    if (o && !d.worker && (this.tick + u.id) % 10 === 0 && (o.type === 'amove' ? o.sub : o.type === 'attack' && o.auto)) {
+      const cur = this.get(o.type === 'amove' ? o.sub : o.target);
+      if (cur && !this.isThreat(cur)) { const en = this.findEnemy(u, d.sight, true); if (en) { if (o.type === 'amove') o.sub = en.id; else o.target = en.id; u.path = null; } }
     }
     if (!o) return;
     switch (o.type) {
@@ -560,12 +598,18 @@ export class Game {
       }
       case 'gather': this.updateGather(u, o); break;
       case 'build': this.updateBuild(u, o); break;
-      case 'resume': {
-        const b = this.get(o.target); if (!b || b.built) { u.order = null; break; }
-        if (b.builder && this.get(b.builder)) { u.order = null; break; }
-        const r = this.moveToward(u, b.x, b.y, b.size, 1);
-        if (r === 'arrived' && u.mp === 0) { b.builder = u.id; this.hide(u, b); }
-        else if (r === 'stuck') u.order = null;
+      case 'repair': {
+        const b = this.get(o.target); if (!this.canRepair(u.owner, b)) { u.order = null; break; }
+        const r = this.moveToward(u, b.x, b.y, b.size, 1, true);
+        if (r === 'stuck') { u.order = null; break; }
+        if (r !== 'arrived' || u.mp > 0) break;
+        const dx = b.x + (b.size >> 1) - u.x; if (dx) u.facing = dx > 0 ? 1 : -1;
+        if (u.anim === 0) { u.anim = 10; this.emit({ t: 'sfx', s: 'hammer', x: u.x, y: u.y }); }
+        if ((this.tick + u.id) % REPAIR_TICKS === 0) {
+          const P = this.players[u.owner];
+          if (P.gold < REPAIR_GOLD || P.wood < REPAIR_WOOD) { this.emit({ t: 'msg', p: u.owner, text: 'Not enough resources to repair', code: P.gold < REPAIR_GOLD ? 'gold' : 'wood' }); u.order = null; break; }
+          P.gold -= REPAIR_GOLD; P.wood -= REPAIR_WOOD; b.hp = Math.min(b.maxHp, b.hp + REPAIR_HP);
+        }
         break;
       }
     }
@@ -580,8 +624,12 @@ export class Game {
       // too close: siege just waits (or attack-move continues)
       if (u.order.type === 'amove') u.order.sub = 0; else if (u.order.auto) u.order = null;
     } else {
-      const r = this.moveToward(u, t.x, t.y, t.size, d.range);
-      if (r === 'stuck') { if (u.order.type === 'amove') u.order.sub = 0; else u.order = null; }
+      const r = this.moveToward(u, t.x, t.y, t.size, d.range, true);
+      if (r === 'stuck') {
+        // no way in (surrounded by friends, walled off): leave this one alone for a while and find something else
+        if (u.order.type === 'amove' || u.order.auto) { u.skipId = t.id; u.skipUntil = this.tick + 100; }
+        if (u.order.type === 'amove') u.order.sub = 0; else u.order = null;
+      }
     }
   }
 
@@ -675,7 +723,7 @@ export class Game {
 
   updateBuild(u, o) {
     const b = BUILDINGS[o.btype], s = b.size;
-    const r = this.moveToward(u, o.x, o.y, s, 1);
+    const r = this.moveToward(u, o.x, o.y, s, 1, true);
     if (r === 'moving') return;
     if (u.mp > 0) return;
     if (r === 'stuck') { this.emit({ t: 'msg', p: u.owner, text: "Can't reach building site", code: 'cantBuild' }); u.order = null; return; }
