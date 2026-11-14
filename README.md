@@ -7,6 +7,12 @@ There's no build step, no server and no assets to download.
 **Kingdom of Vale** vs. **the Ashen Warband**: mine gold, cut lumber, build farms for food, raise an
 army and wipe out every enemy building and unit.
 
+## Phones and tablets
+
+It plays in a mobile browser held sideways: the picture scales to fit and the map view widens to use the screen.
+Tap a unit to select it, tap where it should go (or what to attack, harvest or repair), drag to slide the map,
+hold then drag to box-select, double tap a unit to select all of its kind. Tap the unit panel to deselect.
+
 ## Run it
 
 It's a static site, so any web server will do:

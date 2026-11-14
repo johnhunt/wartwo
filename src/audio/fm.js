@@ -35,6 +35,7 @@ function env(param, t, peak, a, d, s, r, tOff) {
 }
 
 export function playNote(dest, t, midi, dur, name, vel = 1, pan = 0) {
+  const ac = dest.context; // the live context, or an offline one when music is rendered ahead
   const p = PATCH[name] || PATCH.organ;
   const f = mtof(midi), tOff = t + dur, end = tOff + p.r * 4 + 0.05;
   const out = ac.createGain(); out.gain.value = p.gain * vel;
@@ -90,6 +91,7 @@ export function playNote(dest, t, midi, dur, name, vel = 1, pan = 0) {
 
 // ---- percussion -------------------------------------------------------------
 function noiseHit(dest, t, { type = 'bandpass', freq = 2000, q = 1, dur = 0.1, vol = 0.5, attack = 0.001, pan = 0, sweep = 0 }) {
+  const ac = dest.context;
   const s = ac.createBufferSource(); s.buffer = noise();
   const f = ac.createBiquadFilter(); f.type = type; f.frequency.setValueAtTime(freq, t); f.Q.value = q;
   if (sweep) f.frequency.exponentialRampToValueAtTime(Math.max(40, freq * sweep), t + dur);
@@ -99,6 +101,7 @@ function noiseHit(dest, t, { type = 'bandpass', freq = 2000, q = 1, dur = 0.1, v
   s.start(t, Math.random() * 1.5); s.stop(t + dur + 0.05);
 }
 function toneHit(dest, t, { f0 = 150, f1 = 50, dur = 0.3, vol = 0.8, wave = 'sine', fall = 0.08, pan = 0 }) {
+  const ac = dest.context;
   const o = ac.createOscillator(); o.type = wave; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + fall);
   const g = ac.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.003); g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
   o.connect(g);

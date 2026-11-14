@@ -4,7 +4,14 @@ import * as S from './sprites.js';
 import { c, rgb, teamCSS } from './palette.js';
 import { paintGround, waterFrame, WATER_FRAMES, treeClump, rockClump, TREE, ROCKV, MINI_COL } from './terrain.js';
 
+// The picture is always 480 logical pixels tall. Its width follows the shape of the window or
+// phone screen (640 for 4:3 up to 960 for wide screens), and the map view takes whatever the side panel leaves.
+export const SCREEN = { w: 640, h: 480, ver: 0 };
 export const VIEW = { x: 176, y: 16, w: 464, h: 448 };
+export function setScreenWidth(w) {
+  w = Math.max(640, Math.min(960, w & ~1)); if (w === SCREEN.w) return;
+  SCREEN.w = w; VIEW.w = w - VIEW.x; SCREEN.ver++;
+}
 export const MINI = { x: 24, y: 14, s: 128 };
 const CHUNK = 8;
 const UO = S.UNIT_OFF, BO = S.BUILD_OFF;
@@ -25,7 +32,7 @@ export class Renderer {
     this.trees = [0, 1, 2, 3, 4, 5].map(v => treeClump(v).toCanvas(l0));
     this.rocks = [0, 1, 2, 3].map(v => rockClump(v).toCanvas(l0));
     this.panel = S.stonePanel(176, 480);
-    this.topbar = S.woodPanel(640, 16);
+    this.topbar = S.woodPanel(960 - 176, 16); this.screenVer = SCREEN.ver;
     this.fogCv = document.createElement('canvas'); this.fogCv.width = this.fogCv.height = 18;
     this.mini = document.createElement('canvas'); this.mini.width = this.mini.height = MINI.s;
     this.miniFog = document.createElement('canvas'); this.miniFog.width = game.w; this.miniFog.height = game.h;
@@ -111,6 +118,7 @@ export class Renderer {
   // ------------------------------------------------------------ main draw
   draw(alpha, ui) {
     const ctx = this.ctx, g = this.g; this.frame++;
+    if (this.screenVer !== SCREEN.ver || ctx.imageSmoothingEnabled) { this.screenVer = SCREEN.ver; this._hud = null; ctx.imageSmoothingEnabled = false; this.clampCam(); }
     // animation runs on the clock, not the frame count, so it looks the same on 60 Hz and 144 Hz screens
     const now = performance.now(), dtf = Math.min(4, (now - (this.lastT ?? now)) / (1000 / 60)); this.lastT = now;
     if (this.frame % 6 === 0) this.computeVis();
@@ -130,7 +138,7 @@ export class Renderer {
       if (cx < 0 || cy < 0 || cx * CHUNK >= g.w || cy * CHUNK >= g.h || this.chunkReady(cx, cy)) continue;
       this.drawChunk(cx, cy); break pre;
     }
-    const tx0 = Math.floor(this.cam.x / TILE), ty0 = Math.floor(this.cam.y / TILE), tx1 = Math.min(g.w - 1, tx0 + 15), ty1 = Math.min(g.h - 1, ty0 + 15);
+    const tx0 = Math.floor(this.cam.x / TILE), ty0 = Math.floor(this.cam.y / TILE), tx1 = Math.min(g.w - 1, tx0 + Math.ceil(VIEW.w / TILE) + 1), ty1 = Math.min(g.h - 1, ty0 + 15);
     // ground effects
     for (const f of this.effects) {
       if (f.k === 'rubble') ctx.drawImage(S.rubbleSprite(f.size), f.x * TILE - 4, f.y * TILE - 4);
@@ -237,12 +245,13 @@ export class Renderer {
     // rally point
     if (ui.selection.length === 1) { const b = g.get(ui.selection[0]); if (b && !b.unit && b.rally && b.owner === this.me) this.rallyFlag(b.rally.x * TILE, b.rally.y * TILE); }
     // building ghost
-    if (ui.mode === 'place' && ui.mouse.inView) this.ghost(ui);
+    if (ui.mode === 'place' && ui.mouse.inView && ui.placeAt && !(ui.touch && !ui.placeFixed)) this.ghost(ui);
     // fog of war: hard black over the unknown, with soft edges bleeding into known ground
     if (!this.revealAll && this.me >= 0) {
-      const fw = 18, fc = this.fogCv.getContext('2d'), id = fc.createImageData(fw, fw), fx0 = tx0 - 1, fy0 = ty0 - 1;
+      const fw = Math.ceil(VIEW.w / TILE) + 4, fh = 18; if (this.fogCv.width !== fw) this.fogCv.width = fw;
+      const fc = this.fogCv.getContext('2d'), id = fc.createImageData(fw, fh), fx0 = tx0 - 1, fy0 = ty0 - 1;
       ctx.fillStyle = '#000';
-      for (let y = 0; y < fw; y++) for (let x = 0; x < fw; x++) {
+      for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) {
         const X = fx0 + x, Y = fy0 + y, inb = X >= 0 && Y >= 0 && X < g.w && Y < g.h, i = Y * g.w + X;
         const a = !inb ? 255 : !this.explored[i] ? 255 : !this.visible[i] ? 105 : 0;
         id.data[(y * fw + x) * 4 + 3] = a;
@@ -252,7 +261,7 @@ export class Renderer {
         }
       }
       fc.putImageData(id, 0, 0);
-      ctx.imageSmoothingEnabled = true; ctx.drawImage(this.fogCv, fx0 * TILE, fy0 * TILE, fw * TILE, fw * TILE); ctx.imageSmoothingEnabled = false;
+      ctx.imageSmoothingEnabled = true; ctx.drawImage(this.fogCv, fx0 * TILE, fy0 * TILE, fw * TILE, fh * TILE); ctx.imageSmoothingEnabled = false;
     }
     // effects aging
     for (const f of this.effects) f.t += dtf;
@@ -331,7 +340,7 @@ export class Renderer {
   // Text is drawn last, at the display's real resolution on the overlay canvas, so it stays sharp
   // however far the 640x480 picture is scaled up. Without an overlay it falls back to the game canvas.
   flushText() {
-    const ov = Renderer.overlay, ctx = ov ? ov.getContext('2d') : this.ctx, k = ov ? ov.width / 640 : 1;
+    const ov = Renderer.overlay, ctx = ov ? ov.getContext('2d') : this.ctx, k = ov ? ov.height / SCREEN.h : 1;
     if (ov) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, ov.width, ov.height); }
     ctx.textBaseline = 'top'; ctx.lineJoin = 'round';
     for (const t of this.texts) {
@@ -384,7 +393,7 @@ export class Renderer {
   // static interface art, composed once
   hudBack() {
     if (this._hud) return this._hud;
-    const cv = document.createElement('canvas'); cv.width = 640; cv.height = 480; const x = cv.getContext('2d');
+    const cv = document.createElement('canvas'); cv.width = SCREEN.w; cv.height = 480; const x = cv.getContext('2d');
     x.drawImage(this.panel, 0, 0); x.drawImage(this.topbar, 176, 0); x.drawImage(this.topbar, 176, 464);
     // panel edge trim along the viewport
     x.fillStyle = '#000'; x.fillRect(175, 0, 1, 480); x.fillStyle = rgb(c('gold', 2)); x.fillRect(172, 0, 3, 480); x.fillStyle = rgb(c('gold', 5)); x.fillRect(172, 0, 1, 480); x.fillStyle = rgb(c('gold', 1)); x.fillRect(174, 0, 1, 480);
@@ -416,6 +425,12 @@ export class Renderer {
     // info box
     const ib = { x: 8, y: 150, w: 160, h: 112 };
     const sel = ui.selection.map(id => g.get(id)).filter(Boolean);
+    if (ui.touch && !sel.length && P) { // touch shortcuts live in the empty info panel
+      for (const [i, a, b] of [[0, 'Idle', 'worker'], [1, 'Last', 'alert']]) {
+        const bx = ib.x + 6 + i * 76, by = ib.y + 30; ctx.fillStyle = 'rgba(120,96,60,.35)'; ctx.fillRect(bx, by, 72, 52); S.frame(ctx, bx, by, 72, 52, 'steel');
+        this.text(a, bx + 36, by + 12, '#f0d878', 11, 'center'); this.text(b, bx + 36, by + 27, '#f0d878', 11, 'center');
+      }
+    } else if (ui.touch && sel.length) this.text('tap here to deselect', ib.x + ib.w / 2, ib.y + ib.h + 1, '#a89878', 8, 'center', false);
     if (sel.length === 1) this.infoSingle(sel[0], ib);
     else if (sel.length > 1) {
       sel.forEach((e, i) => {
@@ -437,14 +452,15 @@ export class Renderer {
       S.frame(ctx, x + 2, y + 2, 46, 38, ui.hoverBtn === b.id && !b.disabled ? 'gold' : 'steel');
       if (b.hot) this.text(b.hot === 'Escape' ? 'Esc' : b.hot.toUpperCase(), x + 46, y + 28, '#fff', 9, 'right');
     });
-    this.text('Menu (F10)', 88, 443, '#f0d878', 10, 'center');
+    this.text(ui.touch ? 'Menu' : 'Menu (F10)', 88, 443, '#f0d878', 10, 'center');
     if (ui.paused && !ui.banner) { this.text('PAUSED', VIEW.x + VIEW.w / 2, VIEW.y + 190, '#f0d878', 22, 'center', true, true); this.text('Press P to resume', VIEW.x + VIEW.w / 2, VIEW.y + 220, '#e0e0e0', 10, 'center', false); }
     // status line
     let status = '';
     const hb = ui.buttons.find(b => b.id === ui.hoverBtn);
     if (hb) status = hb.label + (hb.cost ? '   ' + hb.cost : '');
     else if (ui.mode === 'target') status = ui.targetLabel + ' — click a target (Esc to cancel)';
-    else if (ui.mode === 'place') status = 'Place ' + nameOf(ui.buildType, P.faction) + ' (Esc to cancel, Shift for more)';
+    else if (ui.mode === 'place') status = ui.touch ? (ui.placeFixed ? 'Tap the outline to build ' + nameOf(ui.buildType, P.faction) + ', or drag it' : 'Tap where to build the ' + nameOf(ui.buildType, P.faction)) : 'Place ' + nameOf(ui.buildType, P.faction) + ' (Esc to cancel, Shift for more)';
+    else if (ui.mode === 'target' && ui.touch) status = ui.targetLabel + ' — tap a target';
     const now = performance.now();
     this.text(status, 184, 466, '#f0d878', 10);
     // floating messages in viewport

@@ -28,7 +28,8 @@ export function ctx() {
   if (ac) { if (ac.state === 'suspended' && !held) ac.resume(); return ac; }
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return null;
-  ac = new AC({ latencyHint: 'interactive' });
+  // phones get a slightly larger output buffer: far fewer crackles for a few ms of extra latency
+  ac = new AC({ latencyHint: window.matchMedia?.('(pointer: coarse)').matches ? 'balanced' : 'interactive' });
   const master = ac.createGain(); master.gain.value = 0.9;
   // gentle limiter so stacked battle sounds never clip harshly
   const comp = ac.createDynamicsCompressor();
@@ -92,10 +93,13 @@ export function brown() {
 }
 
 // OPL2/OPL3 operator waveforms, built as PeriodicWaves from their Fourier series.
-const waves = {};
-export function oplWave(n) {
+// The Fourier coefficients are shared; the PeriodicWave itself belongs to one context (live or offline).
+const coef = {}, waves = new WeakMap();
+export function oplWave(n, cx = ac) {
   if (!n) return null; // 0 = plain sine
-  if (waves[n]) return waves[n];
+  let per = waves.get(cx); if (!per) waves.set(cx, per = {});
+  if (per[n]) return per[n];
+  if (coef[n]) return (per[n] = cx.createPeriodicWave(coef[n][0], coef[n][1]));
   const N = 2048, H = 48, samp = new Float32Array(N);
   for (let i = 0; i < N; i++) {
     const s = Math.sin(2 * Math.PI * i / N), ph = i / N;
@@ -113,9 +117,9 @@ export function oplWave(n) {
     for (let i = 0; i < N; i++) { const w = 2 * Math.PI * k * i / N; a += (samp[i] - mean) * Math.cos(w); b += (samp[i] - mean) * Math.sin(w); }
     re[k] = a / N; im[k] = b / N;
   }
-  waves[n] = ac.createPeriodicWave(re, im);
-  return waves[n];
+  coef[n] = [re, im];
+  return (per[n] = cx.createPeriodicWave(re, im));
 }
-export function setWave(osc, n) { const w = oplWave(n); if (w) osc.setPeriodicWave(w); else osc.type = 'sine'; }
+export function setWave(osc, n) { const w = oplWave(n, osc.context); if (w) osc.setPeriodicWave(w); else osc.type = 'sine'; }
 
 export const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);

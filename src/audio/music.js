@@ -1,6 +1,6 @@
 // Arranger + look-ahead sequencer + jukebox.
 import { ac, ctx, bus, whenUnlocked } from './core.js';
-import { playNote, DRUM, DRUM_KEYS } from './fm.js';
+import { playNote, DRUM, DRUM_KEYS, PATCH } from './fm.js';
 import { SONGS, GROOVES, MODES, PLAYLISTS } from './songs.js';
 
 const PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
@@ -108,28 +108,53 @@ export function arrange(id) {
 }
 
 // ---------------------------------------------------------------- player
+// The score is not synthesised live. Each few seconds of music are rendered ahead of time on an
+// OfflineAudioContext (off the main thread, not in real time) and played back as plain buffers,
+// well before they are needed. Playback then costs almost nothing and cannot stutter when the
+// game is busy or the device is slow, and it sounds exactly as the live synth did.
+const CHUNK = 6, AHEAD = 14, LEAD = 0.02;
 class Player {
   constructor(arr, startAt, loops) {
-    this.a = arr; this.i = 0; this.start = startAt; this.loops = loops; this.done = false;
+    this.a = arr; this.start = startAt; this.loops = loops; this.done = false; this.c = 0; this.busy = false; this.srcs = new Set();
+    this.total = arr.length * arr.spb * loops; this.endAt = Infinity;
     this.out = ac.createGain(); this.out.gain.value = arr.song.gain || 1; this.out.connect(bus.music);
   }
-  pump(until) {
-    const { events, length, spb } = this.a;
-    while (!this.done) {
-      if (this.i >= events.length) {
-        this.loops--;
-        if (this.loops <= 0) { this.done = true; this.endAt = this.start + length * spb; break; }
-        this.start += length * spb; this.i = 0; continue;
-      }
-      const e = events[this.i]; const t = this.start + e.t * spb;
-      if (t > until) break;
-      this.i++;
-      if (t < ac.currentTime - 0.05) continue;
-      if (e.drum) DRUM[e.drum](this.out, t, e.vel);
-      else playNote(this.out, t, e.midi, e.len * spb * 0.97, e.inst, e.vel, e.pan);
-    }
+  // notes that begin inside chunk c, as [time within chunk, event]
+  notes(c) {
+    const { events, length, spb } = this.a, L = length * spb, t0 = c * CHUNK, t1 = Math.min(this.total, t0 + CHUNK), out = [];
+    for (let lp = Math.floor(t0 / L); lp < this.loops && lp * L < t1; lp++) for (const e of events) { const t = lp * L + e.t * spb; if (t >= t0 && t < t1) out.push([t - t0, e]); }
+    return out;
   }
-  fadeOut(sec = 1.5) { const t = ac.currentTime; this.out.gain.setValueAtTime(this.out.gain.value, t); this.out.gain.linearRampToValueAtTime(0, t + sec); this.done = true; this.dead = true; setTimeout(() => this.out.disconnect(), sec * 1000 + 200); }
+  pump() {
+    if (this.dead || this.busy || this.finished) return;
+    const t0 = this.c * CHUNK;
+    if (t0 >= this.total) { this.finished = true; this.done = true; this.endAt = this.start + this.total; return; }
+    if (this.c > 0 && this.start + t0 > ac.currentTime + AHEAD) return;
+    const notes = this.notes(this.c), spb = this.a.spb, c = this.c++;
+    if (!notes.length) return;
+    let end = CHUNK; for (const [t, e] of notes) end = Math.max(end, t + (e.drum ? 1.6 : e.len * spb + (PATCH[e.inst] || PATCH.organ).r * 4 + 0.1));
+    let off;
+    try { off = new OfflineAudioContext(2, Math.ceil((end + LEAD) * ac.sampleRate), ac.sampleRate); } catch { this.live(notes, t0); return; }
+    for (const [t, e] of notes) { if (e.drum) DRUM[e.drum](off.destination, t + LEAD, e.vel); else playNote(off.destination, t + LEAD, e.midi, e.len * spb * 0.97, e.inst, e.vel, e.pan); }
+    this.busy = true;
+    off.startRendering().then((buf) => {
+      this.busy = false; if (this.dead) return;
+      // rendered later than it was due (first chunk, or a very slow device): slide the whole tune back rather than clip it
+      const now = ac.currentTime + 0.06; if (this.start + t0 - LEAD < now) this.start = now - t0 + LEAD;
+      const s = ac.createBufferSource(); s.buffer = buf; s.connect(this.out); s.start(this.start + t0 - LEAD);
+      this.srcs.add(s); s.onended = () => { this.srcs.delete(s); s.disconnect(); };
+      this.pump();
+    }, () => { this.busy = false; this.live(notes, t0); });
+  }
+  // fallback for browsers without offline rendering: schedule the chunk's notes directly
+  live(notes, t0) {
+    const spb = this.a.spb, now = ac.currentTime + 0.05; if (this.start + t0 < now) this.start = now - t0;
+    for (const [t, e] of notes) { const at = this.start + t0 + t; if (e.drum) DRUM[e.drum](this.out, at, e.vel); else playNote(this.out, at, e.midi, e.len * spb * 0.97, e.inst, e.vel, e.pan); }
+  }
+  fadeOut(sec = 1.5) {
+    const t = ac.currentTime; this.out.gain.setValueAtTime(this.out.gain.value, t); this.out.gain.linearRampToValueAtTime(0, t + sec); this.done = true; this.dead = true;
+    setTimeout(() => { for (const s of this.srcs) { try { s.stop(); } catch { /* not started */ } } this.out.disconnect(); }, sec * 1000 + 200);
+  }
 }
 
 const cache = {};
@@ -138,7 +163,7 @@ function arrangement(id) { return cache[id] || (cache[id] = arrange(id)); }
 
 function tick() {
   if (!ac || !jb.cur) return;
-  jb.cur.pump(ac.currentTime + 0.35);
+  jb.cur.pump();
   if (jb.cur.done && !jb.cur.dead && ac.currentTime > jb.cur.endAt + 1.5) {
     if (jb.after) { const f = jb.after; jb.after = null; f(); }
     else nextInList();
@@ -152,7 +177,8 @@ function start(id, loops) {
   jb.cur = new Player(a, ac.currentTime + 0.25, loops);
   jb.nowPlaying = a.song.title;
   for (const l of jb.listeners) l(a.song.title);
-  if (!jb.timer) jb.timer = setInterval(tick, 40);
+  jb.cur.pump();
+  if (!jb.timer) jb.timer = setInterval(tick, 250);
 }
 function nextInList() {
   if (!jb.list.length) { jb.cur = null; return; }

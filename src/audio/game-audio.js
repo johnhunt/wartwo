@@ -4,11 +4,11 @@ import * as speech from './speech.js';
 import * as music from './music.js';
 import { UNITS } from '../data.js';
 
-let G = null, R = null, me = -1, fac = 0, addMsg = () => {};
+let G = null, R = null, me = -1, fac = 0, addMsg = () => {}, V = { w: 464, h: 448 };
 let ambT = 0, birdT = 0, buildT = 0, fireT = 0, lastCombat = 0, alertT = 0;
 
 export function attach(game, renderer, mySlot, msgFn, VIEW) {
-  G = game; R = renderer; me = mySlot; addMsg = msgFn;
+  G = game; R = renderer; me = mySlot; addMsg = msgFn; V = VIEW;
   fac = me >= 0 ? game.players[me].faction : 0;
   sfx.setListener(() => ({ x: (R.cam.x + VIEW.w / 2) / 32, y: (R.cam.y + VIEW.h / 2) / 32, halfW: VIEW.w / 64, halfH: VIEW.h / 64 }));
   speech.preload([...new Set(game.players.map(p => p.faction))]);
@@ -79,7 +79,7 @@ export function event(ev) {
     }
   }
 }
-function onScreen(x, y) { return x * 32 >= R.cam.x - 32 && x * 32 <= R.cam.x + 464 + 32 && y * 32 >= R.cam.y - 32 && y * 32 <= R.cam.y + 448 + 32; }
+function onScreen(x, y) { return x * 32 >= R.cam.x - 32 && x * 32 <= R.cam.x + V.w + 32 && y * 32 >= R.cam.y - 32 && y * 32 <= R.cam.y + V.h + 32; }
 
 // ---------------------------------------------------------------- player actions
 const BLD_SOUND = {
@@ -104,7 +104,7 @@ export function ordered(ents, kind) {
 export function ambience(now) {
   if (!G || !R) return;
   if (now - ambT < 250) return; ambT = now;
-  const tx0 = R.cam.x / 32, ty0 = R.cam.y / 32, tx1 = tx0 + 464 / 32, ty1 = ty0 + 448 / 32;
+  const tx0 = R.cam.x / 32, ty0 = R.cam.y / 32, tx1 = tx0 + V.w / 32, ty1 = ty0 + V.h / 32;
   const inView = (e) => e.x + e.size > tx0 && e.x < tx1 && e.y + e.size > ty0 && e.y < ty1 && !e.dead;
   if (now > buildT) { // construction noise
     const sites = G.ents.filter(e => !e.unit && !e.built && inView(e) && seen(e.x, e.y));

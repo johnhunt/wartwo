@@ -2,18 +2,20 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
 <title>Wartwo — Tides of Iron</title>
 <style>
   :root { --gold: #f0d878; --stone: #3a3028; --stone2: #5a4a3a; --dark: #120e0a; }
-  html, body { margin: 0; height: 100%; background: #000; color: var(--gold); font-family: "Trebuchet MS", Verdana, sans-serif; overflow: hidden; }
+  html, body { margin: 0; height: 100%; overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; background: #000; color: var(--gold); font-family: "Trebuchet MS", Verdana, sans-serif; overflow: hidden; }
   #wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
   #stage { position: relative; line-height: 0; }
-  canvas#screen { image-rendering: pixelated; image-rendering: crisp-edges; background: #000; cursor: none; }
+  canvas#screen { touch-action: none; image-rendering: pixelated; image-rendering: crisp-edges; background: #000; cursor: none; }
   canvas#overlay { position: absolute; left: 0; top: 0; pointer-events: none; }
   #menu { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(20,12,6,.15) 0%, rgba(0,0,0,.72) 85%); }
   #menu.hidden, .hidden { display: none !important; }
-  .panel { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; padding: 24px 28px;
+  .panel { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); max-height: calc(100dvh - 16px); overflow: auto; box-sizing: border-box; padding: 24px 28px;
     background: linear-gradient(rgba(10,8,12,.30), rgba(10,8,12,.52)), var(--stone-img, none) 0 0 / 352px auto, #3a3028; image-rendering: pixelated;
     border: 3px solid #96600a; outline: 2px solid #000;
     box-shadow: inset 0 0 0 1px #000, inset 0 0 0 3px #e8b418, inset 0 0 0 4px #3c2000, inset 0 0 0 5px #000, inset 0 0 28px rgba(0,0,0,.7), 0 0 0 3px #1a120a, 0 12px 44px #000; }
@@ -39,6 +41,15 @@
   .swatch { display: inline-block; width: 12px; height: 12px; border: 1px solid #000; vertical-align: middle; margin-right: 6px; }
   .help { font-size: 13px; line-height: 1.5; color: #e8dcc0; }
   .help kbd { background: #1a130c; border: 1px solid #000; padding: 0 4px; color: var(--gold); }
+  input, select { -webkit-user-select: text; user-select: text; }
+  /* short screens (a phone held sideways): tighter menus */
+  @media (max-height: 520px) {
+    .panel { padding: 12px 18px; } h1 { font-size: 30px; letter-spacing: 4px; } h2 { margin-bottom: 6px; }
+    button { margin: 5px 0; padding: 8px 12px; } label { margin: 5px 0; } .list { min-height: 60px; max-height: 110px; }
+    #p-title { display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px; width: min(600px, calc(100vw - 24px)); } #p-title > h1, #p-title > h2, #p-title > p { grid-column: 1 / -1; }
+  }
+  #rotate { display: none; position: fixed; inset: 0; z-index: 50; background: #0a0806; align-items: center; justify-content: center; text-align: center; padding: 24px; font: 18px Georgia, serif; color: var(--gold); }
+  @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
   #chat { position: absolute; left: 50%; bottom: 8%; transform: translateX(-50%); width: min(400px, 80vw); font-size: 14px; }
 </style>
 </head>
@@ -103,6 +114,7 @@
       <kbd>B</kbd> basic buildings · <kbd>V</kbd> advanced buildings · building hotkeys are shown on the buttons<br>
       <kbd>Ctrl</kbd>+<kbd>1–9</kbd> make a group, <kbd>1–9</kbd> recall it (press twice to centre)<br>
       <b>Drag with the right or middle mouse button</b>, use the mouse wheel / two-finger scroll, the arrow keys or the screen edge to move the map · click the minimap to jump · <kbd>Space</kbd> jump to the last alert · <kbd>Tab</kbd> next idle worker · <kbd>Enter</kbd> chat · <kbd>F10</kbd> menu · <kbd>P</kbd> pause (single player)</p>
+      <p><b>Touch screens:</b> <b>tap</b> one of your units to select it, then <b>tap</b> where it should go or what it should attack, harvest or repair · <b>drag</b> to slide the map · <b>hold, then drag</b> to box-select · <b>double tap</b> a unit to select all of its kind · tap the unit panel to deselect · to build, tap the spot and then tap the outline to confirm.</p>
       <p><b>Sound:</b> units answer when you select them or give orders, and grow annoyed if you keep clicking them. Music, effects and voices can be adjusted under <b>Sound &amp; Music</b> (F10 in game).</p>
       <p class="muted">Death screams by Michel Baradari, JeanMyna_VA, creativeheroes and thanvannispen (CC-BY 3.0) and other CC0 contributors; unit voices rendered with Kokoro-82M (Apache-2.0). Full credits are in CREDITS.md.</p>
       <p><b>Tech:</b> Lumber Mill → archers, towers and the Forge · Barracks → Stables → cavalry · Forge → siege engines.</p>
@@ -129,6 +141,7 @@
     <button id="pz-quit">Surrender &amp; Quit</button>
   </div>
 </div>
+<div id="rotate"><div><div style="font-size:54px">&#x21BB;</div>Turn your phone sideways to play.</div></div>
 <script type="module" src="src/main.js"></script>
 </body>
 </html>

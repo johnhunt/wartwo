@@ -1,5 +1,5 @@
 import { Game } from './sim.js';
-import { Renderer, VIEW, MINI } from './render.js';
+import { Renderer, VIEW, MINI, SCREEN, setScreenWidth } from './render.js';
 import { Lockstep, Lobby } from './net.js';
 import { TILE, TICK_MS, UNITS, BUILDINGS, MAX_SELECT, nameOf } from './data.js';
 import { TEAM_COLORS, teamCSS } from './palette.js';
@@ -18,13 +18,21 @@ let ui = null;
 
 // ------------------------------------------------------------------ scaling
 function fit() {
-  const s = Math.max(1, Math.min(window.innerWidth / 640, window.innerHeight / 480));
+  // Always fit the whole picture on screen (phones scale it down), and widen the map view to use
+  // whatever width the window or phone has beyond 4:3.
+  const iw = window.innerWidth, ih = window.innerHeight, s = Math.min(iw / 640, ih / 480);
   const k = s >= 2 ? Math.floor(s) : s; // integer scale when big enough
-  cv.style.width = overlay.style.width = (640 * k) + 'px'; cv.style.height = overlay.style.height = (480 * k) + 'px';
+  setScreenWidth(Math.floor(iw / k));
+  if (cv.width !== SCREEN.w) cv.width = SCREEN.w;
+  cv.style.width = overlay.style.width = (SCREEN.w * k) + 'px'; cv.style.height = overlay.style.height = (480 * k) + 'px';
   // the text overlay is backed by real device pixels
   const dpr = window.devicePixelRatio || 1;
-  overlay.width = Math.max(640, Math.round(640 * k * dpr)); overlay.height = Math.round(overlay.width * 0.75);
+  overlay.width = Math.round(SCREEN.w * k * dpr); overlay.height = Math.round(480 * k * dpr);
 }
+window.addEventListener('orientationchange', () => setTimeout(fit, 250));
+const coarse = () => !!window.matchMedia?.('(pointer: coarse)').matches;
+// phones: play fullscreen and sideways where the browser allows it (needs a tap, so it is called from Start buttons)
+function goImmersive() { if (!coarse() || document.fullscreenElement) return; document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {}); }
 function toggleFullscreen() { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.().catch(() => {}); }
 $('b-full').onclick = $('pz-full').onclick = () => { sfx.play('click'); toggleFullscreen(); };
 window.addEventListener('resize', fit); fit();
@@ -50,7 +58,7 @@ $('sp-back').onclick = () => show('p-title');
 
 // ------------------------------------------------------------------ sound settings
 music.playlist('menu');
-whenUnlocked(() => $('snd-hint').classList.add('hidden'));
+whenUnlocked(() => { $('snd-hint').style.visibility = 'hidden'; }); // keep its space: removing it would shift the buttons mid-tap
 let soundBack = 'p-title';
 function openSound(from) {
   soundBack = from; sfx.play('click');
@@ -68,6 +76,7 @@ $('snd-test1').onclick = () => speech.unitLine(['worker', 'soldier', 'archer', '
 $('snd-next').onclick = () => music.skip();
 music.onTrack((t) => { $('snd-now').textContent = t; });
 $('sp-go').onclick = () => {
+  goImmersive();
   const name = $('sp-name').value.trim() || 'Commander', faction = +$('sp-faction').value;
   store.set('name', name); store.set('faction', faction);
   const n = +$('sp-opp').value, level = +$('sp-level').value, players = [{ name, faction, color: 0 }];
@@ -100,6 +109,7 @@ $('room-ai1').onclick = () => lobby && lobby.addAI(1);
 $('room-leave').onclick = () => { lobby && lobby.leaveGame(); show('p-mp'); };
 $('room-start').onclick = () => {
   if (!lobby || !lobby.hosting) return;
+  goImmersive();
   const d = lobby.start(Math.floor(Math.random() * 1e9));
   startGame(d, 0, lobby);
 };
@@ -180,7 +190,8 @@ function loop(now) {
   updateHover();
   ui.netStatus = LS.online ? (LS.desync ? 'DESYNC!' : LS.waiting ? 'Waiting for players…' : '') : (paused ? 'PAUSED' : '');
   ui.selection = ui.selection.filter(id => { const e = game.get(id); return e && !e.hidden; });
-  if (ui.mode === 'place') ui.placeAt = placeTile();
+  ui.touch = touchMode;
+  if (ui.mode === 'place') { ui.placeAt = touchMode && ui.placeFixed ? ui.placeFixed : placeTile(); if (touchMode) ui.mouse.inView = true; }
   if (!paused || LS.online) GA.ambience(now); // a paused world is a silent one
   R.draw(Math.min(1, acc / TICK_MS), ui);
   drawCursor();
@@ -223,7 +234,7 @@ function drainEvents() {
 }
 
 // ------------------------------------------------------------------ input
-function canvasPos(e) { const r = cv.getBoundingClientRect(); return [Math.floor((e.clientX - r.left) * 640 / r.width), Math.floor((e.clientY - r.top) * 480 / r.height)]; }
+function canvasPos(e) { const r = cv.getBoundingClientRect(); return [Math.floor((e.clientX - r.left) * SCREEN.w / r.width), Math.floor((e.clientY - r.top) * 480 / r.height)]; }
 function inView(x, y) { return x >= VIEW.x && y >= VIEW.y && x < VIEW.x + VIEW.w && y < VIEW.y + VIEW.h; }
 function inMini(x, y) { return x >= MINI.x && y >= MINI.y && x < MINI.x + MINI.s && y < MINI.y + MINI.s; }
 function miniToTile(x, y) { return [Math.floor((x - MINI.x) / MINI.s * game.w), Math.floor((y - MINI.y) / MINI.s * game.h)]; }
@@ -265,6 +276,7 @@ cv.addEventListener('mousedown', e => {
 });
 window.addEventListener('mousemove', e => {
   if (!running) return;
+  touchMode = false;
   const [x, y] = canvasPos(e); ui.mouse.x = x; ui.mouse.y = y; ui.mouse.inView = inView(x, y);
   if (ui.pan) {
     const p = ui.pan; if (Math.abs(x - p.x) + Math.abs(y - p.y) > 5) p.moved = true;
@@ -287,7 +299,7 @@ window.addEventListener('mouseup', e => {
 // mouse wheel / two-finger trackpad scroll slides the map
 cv.addEventListener('wheel', e => {
   if (!running || !R) return; e.preventDefault();
-  const r = cv.getBoundingClientRect(), k = (e.deltaMode === 1 ? 24 : 1) * 640 / r.width;
+  const r = cv.getBoundingClientRect(), k = (e.deltaMode === 1 ? 24 : 1) * SCREEN.w / r.width;
   R.cam.x += (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * k; R.cam.y += (e.shiftKey && !e.deltaX ? 0 : e.deltaY) * k; R.clampCam();
 }, { passive: false });
 cv.addEventListener('auxclick', e => e.preventDefault());
@@ -301,8 +313,8 @@ function boxSelect(d) {
   if (!sel.length) return;
   ui.selection = sel.slice(0, MAX_SELECT).map(e => e.id); ui.menu = null; GA.selected(sel);
 }
-function clickSelect(x, y, shift, all) {
-  const [wx, wy] = R.screenToWorld(x, y); const t = R.entityAt(wx, wy);
+function clickSelect(x, y, shift, all, picked) {
+  const [wx, wy] = R.screenToWorld(x, y); const t = picked !== undefined ? picked : R.entityAt(wx, wy);
   if (!t) { if (!shift) { ui.selection = []; ui.menu = null; } return; }
   if (all && t.owner === LS.mySlot && t.unit) {
     const vis = game.ents.filter(e => !e.dead && !e.hidden && e.owner === LS.mySlot && e.type === t.type && e._px >= R.cam.x - 16 && e._px <= R.cam.x + VIEW.w && e._py >= R.cam.y - 16 && e._py <= R.cam.y + VIEW.h);
@@ -345,13 +357,127 @@ function pressButton(b) {
   if (a.k === 'cmd') { issue({ t: a.t, ids }, a.t === 'cancel' ? null : 'ack'); ui.mode = null; }
   else if (a.k === 'target') { ui.mode = 'target'; ui.targetKind = a.t; ui.targetLabel = b.label; }
   else if (a.k === 'menu') { ui.menu = a.menu; ui.mode = null; }
-  else if (a.k === 'place') { ui.mode = 'place'; ui.buildType = a.btype; }
+  else if (a.k === 'place') { ui.mode = 'place'; ui.buildType = a.btype; ui.placeFixed = null; }
   else if (a.k === 'train') issue({ t: 'train', ids, utype: a.utype }, null);
 }
 
 function updateHover() {
+  if (touchMode) { if (performance.now() > (ui.hoverUntil || 0)) ui.hoverBtn = null; return; } // a tapped button keeps its label up briefly
   const b = btnAt(ui.mouse.x, ui.mouse.y); ui.hoverBtn = b ? b.id : null;
 }
+
+function nextIdleWorker() {
+  const idle = game.ents.filter(u => u.owner === LS.mySlot && u.unit && UNITS[u.type].worker && !u.order && !u.hidden && !u.dead);
+  if (!idle.length) { addMsg('No idle workers.'); return; }
+  const next = idle[(idle.findIndex(u => u.id === ui.selection[0]) + 1) % idle.length];
+  ui.selection = [next.id]; ui.menu = null; ui.mode = null; R.centerOn(next.x * TILE + 16, next.y * TILE + 16); GA.selected([next]);
+}
+
+// ------------------------------------------------------------------ touch controls
+// Tap: select your own units, or send the selected ones there (move / attack / harvest / repair).
+// Drag: slide the map. Hold, then drag: box-select. Double tap a unit: select all of its kind on screen.
+// Tap the info panel to deselect; with nothing selected it offers "idle worker" and "last alert".
+let touchMode = false, tch = null, lastTap = { t: 0, x: 0, y: 0 };
+const INFO = { x: 8, y: 150, w: 160, h: 112 };
+function pickAt(wx, wy) {
+  const exact = R.entityAt(wx, wy); if (exact && exact.unit) return exact;
+  let best = null, bd = 24 * 24; // fingers are blunt: take the nearest unit within reach before any building underneath
+  for (const e of game.ents) {
+    if (!e.unit || e.dead || e.hidden || e._px === undefined || (!R.ally(e.owner) && !R.isVisible(e))) continue;
+    const dx = e._px + 16 - wx, dy = e._py + 12 - wy, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = e; }
+  }
+  return best || exact;
+}
+function handleTap(x, y, dbl) {
+  if (!inView(x, y)) return;
+  const [wx, wy] = R.screenToWorld(x, y), tx = Math.floor(wx / TILE), ty = Math.floor(wy / TILE), me = LS.mySlot;
+  if (ui.mode === 'place') { // first tap puts the outline down, a tap on the outline builds
+    const s = BUILDINGS[ui.buildType].size, f = ui.placeFixed;
+    if (f && tx >= f[0] && tx < f[0] + s && ty >= f[1] && ty < f[1] + s) {
+      const w = mySel().find(u => u.unit && UNITS[u.type].worker);
+      if (w) { issue({ t: 'build', ids: [w.id], btype: ui.buildType, x: f[0], y: f[1] }, 'build'); sfx.play('place'); ui.mode = null; ui.menu = null; }
+    } else ui.placeFixed = [Math.floor(wx / TILE - s / 2 + 0.5), Math.floor(wy / TILE - s / 2 + 0.5)];
+    return;
+  }
+  const t = pickAt(wx, wy);
+  if (ui.mode === 'target') { targetAt(tx, ty, t, false); return; }
+  const sel = mySel(), units = sel.filter(e => e.unit);
+  if (t && t.owner === me && t.unit) { clickSelect(x, y, false, dbl, t); return; }
+  if (units.length) {
+    if (t && t.owner === me && !t.unit) { // own building: only an order if the workers have business there
+      const w = units.filter(u => UNITS[u.type].worker), d = BUILDINGS[t.type].depot;
+      if (!(w.length && (game.canRepair(me, t) || (t.built && d && w.some(u => u.carry && d.includes(u.carryKind)))))) { clickSelect(x, y, false, false, t); return; }
+    }
+    rightClick(x, y); return;
+  }
+  if (sel.length && !t) { rightClick(x, y); return; } // buildings selected, bare ground or a tree: rally point
+  clickSelect(x, y, false, false, t);
+}
+const touchById = (list, id) => { for (const t of list) if (t.identifier === id) return t; return null; };
+const centroid = (list) => { let x = 0, y = 0; for (const t of list) { const p = canvasPos(t); x += p[0]; y += p[1]; } return [x / list.length, y / list.length]; };
+cv.addEventListener('touchstart', e => {
+  e.preventDefault(); touchMode = true;
+  if (!running || isFrozen()) return;
+  if (e.touches.length >= 2) { // two fingers always slide the map
+    if (tch) clearTimeout(tch.timer); ui.drag = null;
+    const c = centroid(e.touches); tch = { kind: 'pan2', x0: c[0], y0: c[1], cx: R.cam.x, cy: R.cam.y }; return;
+  }
+  const t0 = e.changedTouches[0], [x, y] = canvasPos(t0), id = t0.identifier;
+  ui.mouse.x = x; ui.mouse.y = y; ui.mouse.inView = inView(x, y);
+  if (x >= 8 && x < 168 && y >= 432 && y < 466) { openMenu(); return; }
+  const b = btnAt(x, y);
+  if (b) { ui.mouseDown = true; ui.hoverBtn = b.id; ui.hoverUntil = performance.now() + 3000; pressButton(b); tch = { kind: 'ui', id }; return; }
+  if (x >= INFO.x && x < INFO.x + INFO.w && y >= INFO.y && y < INFO.y + INFO.h) {
+    if (ui.selection.length) { ui.selection = []; ui.menu = null; ui.mode = null; }
+    else if (x < INFO.x + INFO.w / 2) nextIdleWorker();
+    else if (ui.lastAlert) R.centerOn(ui.lastAlert.x * TILE, ui.lastAlert.y * TILE); else addMsg('No alerts yet.');
+    return;
+  }
+  if (inMini(x, y)) {
+    const [tx, ty] = miniToTile(x, y);
+    if (ui.mode === 'target') targetAt(tx, ty, null, false); else { R.centerOn(tx * TILE, ty * TILE); tch = { kind: 'mini', id }; }
+    return;
+  }
+  if (!inView(x, y)) return;
+  tch = { kind: 'pending', id, x0: x, y0: y, cx: R.cam.x, cy: R.cam.y };
+  const f = ui.mode === 'place' && ui.placeFixed, s = f ? BUILDINGS[ui.buildType].size : 0, [wx, wy] = R.screenToWorld(x, y);
+  if (f && wx >= f[0] * TILE && wx < (f[0] + s) * TILE && wy >= f[1] * TILE && wy < (f[1] + s) * TILE) tch.onGhost = true; // drag the outline itself
+  else if (!ui.mode) tch.timer = setTimeout(() => {
+    if (!tch || tch.kind !== 'pending') return;
+    tch.kind = 'box'; ui.drag = { x0: tch.x0, y0: tch.y0, x1: tch.x0, y1: tch.y0, active: true, shift: false }; navigator.vibrate?.(12);
+  }, 380);
+}, { passive: false });
+cv.addEventListener('touchmove', e => {
+  e.preventDefault(); if (!tch || !running) return;
+  if (e.touches.length >= 2) {
+    const c = centroid(e.touches);
+    if (tch.kind !== 'pan2') { clearTimeout(tch.timer); ui.drag = null; tch = { kind: 'pan2', x0: c[0], y0: c[1], cx: R.cam.x, cy: R.cam.y }; }
+    R.cam.x = tch.cx - (c[0] - tch.x0); R.cam.y = tch.cy - (c[1] - tch.y0); R.clampCam(); return;
+  }
+  const t = touchById(e.touches, tch.id); if (!t) return;
+  const [x, y] = canvasPos(t); ui.mouse.x = x; ui.mouse.y = y;
+  if (tch.kind === 'pending' && Math.abs(x - tch.x0) + Math.abs(y - tch.y0) > 10) { clearTimeout(tch.timer); tch.kind = tch.onGhost ? 'ghost' : 'pan'; }
+  if (tch.kind === 'pan') { R.cam.x = tch.cx - (x - tch.x0); R.cam.y = tch.cy - (y - tch.y0); R.clampCam(); }
+  else if (tch.kind === 'ghost') { const [wx, wy] = R.screenToWorld(x, y), s = BUILDINGS[ui.buildType].size; ui.placeFixed = [Math.floor(wx / TILE - s / 2 + 0.5), Math.floor(wy / TILE - s / 2 + 0.5)]; }
+  else if (tch.kind === 'box' && ui.drag) { ui.drag.x1 = Math.max(VIEW.x, Math.min(VIEW.x + VIEW.w - 1, x)); ui.drag.y1 = Math.max(VIEW.y, Math.min(VIEW.y + VIEW.h - 1, y)); }
+  else if (tch.kind === 'mini') { const [tx, ty] = miniToTile(Math.max(MINI.x, Math.min(MINI.x + MINI.s - 1, x)), Math.max(MINI.y, Math.min(MINI.y + MINI.s - 1, y))); R.centerOn(tx * TILE, ty * TILE); }
+}, { passive: false });
+function touchEnd(e) {
+  e.preventDefault(); if (ui) ui.mouseDown = false;
+  if (!tch || !running) { tch = null; return; }
+  if (tch.kind === 'pan2') { if (e.touches.length === 0) tch = null; return; }
+  if (!touchById(e.changedTouches, tch.id)) return;
+  clearTimeout(tch.timer);
+  const k = tch; tch = null;
+  if (k.kind === 'box') { const d = ui.drag; ui.drag = null; if (d && Math.abs(d.x1 - d.x0) + Math.abs(d.y1 - d.y0) > 8) boxSelect(d); }
+  else if (k.kind === 'pending' && e.type === 'touchend') {
+    const now = performance.now(), dbl = now - lastTap.t < 380 && Math.abs(k.x0 - lastTap.x) + Math.abs(k.y0 - lastTap.y) < 30;
+    lastTap = { t: now, x: k.x0, y: k.y0 };
+    handleTap(k.x0, k.y0, dbl);
+  }
+}
+cv.addEventListener('touchend', touchEnd, { passive: false });
+cv.addEventListener('touchcancel', touchEnd, { passive: false });
 
 const keys = new Set();
 window.addEventListener('keydown', e => {
@@ -373,14 +499,7 @@ window.addEventListener('keydown', e => {
     const c = ui.buttons.find(b => b.hot === 'Escape' && b.act); if (c) pressButton(c);
     return;
   }
-  if (e.key === 'Tab') {
-    e.preventDefault();
-    const idle = game.ents.filter(u => u.owner === LS.mySlot && u.unit && UNITS[u.type].worker && !u.order && !u.hidden && !u.dead);
-    if (!idle.length) { addMsg('No idle workers.'); return; }
-    const next = idle[(idle.findIndex(u => u.id === ui.selection[0]) + 1) % idle.length];
-    ui.selection = [next.id]; ui.menu = null; ui.mode = null; R.centerOn(next.x * TILE + 16, next.y * TILE + 16); GA.selected([next]);
-    return;
-  }
+  if (e.key === 'Tab') { e.preventDefault(); nextIdleWorker(); return; }
   if (e.key === ' ') { if (ui.lastAlert) R.centerOn(ui.lastAlert.x * TILE, ui.lastAlert.y * TILE); e.preventDefault(); return; }
   if ((e.key === 'p' || e.key === 'P') && !LS.online && !e.ctrlKey) { const hb = ui.buttons.find(b => b.hot === 'p'); if (!hb) { paused = !paused; return; } }
   if (/^[1-9]$/.test(e.key)) {
@@ -404,16 +523,17 @@ function openMenu() { sfx.play('menu'); show('p-pause'); if (!LS.online) paused 
 function scroll(fdt) {
   const sp = Math.round(14 * fdt / (1000 / 60)); let dx = 0, dy = 0;
   if (keys.has('ArrowLeft')) dx -= sp; if (keys.has('ArrowRight')) dx += sp; if (keys.has('ArrowUp')) dy -= sp; if (keys.has('ArrowDown')) dy += sp;
-  if (document.hasFocus() && $('menu').classList.contains('hidden') && !ui.drag && !ui.pan) {
+  if (document.hasFocus() && $('menu').classList.contains('hidden') && !ui.drag && !ui.pan && !touchMode) {
     const { x, y } = ui.mouse;
-    if (x <= 2) dx -= sp; if (x >= 637) dx += sp; if (y <= 2) dy -= sp; if (y >= 477) dy += sp;
+    if (x <= 2) dx -= sp; if (x >= SCREEN.w - 3) dx += sp; if (y <= 2) dy -= sp; if (y >= 477) dy += sp;
   }
   if (dx || dy) { R.cam.x += dx; R.cam.y += dy; R.clampCam(); }
 }
 
 // ------------------------------------------------------------------ cursor
 function drawCursor() {
-  const ctx = overlay.getContext('2d'), k = overlay.width / 640; const { x, y } = ui.mouse;
+  if (touchMode) return; // no pointer to draw on a touch screen
+  const ctx = overlay.getContext('2d'), k = overlay.height / SCREEN.h; const { x, y } = ui.mouse;
   ctx.setTransform(k, 0, 0, k, 0, 0); ctx.imageSmoothingEnabled = false;
   if (ui.mode === 'target' && inView(x, y) || ui.mode === 'target' && inMini(x, y)) {
     ctx.strokeStyle = ui.targetKind === 'attack' ? '#ff4040' : '#f0d878'; ctx.lineWidth = 1;
