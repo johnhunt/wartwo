@@ -47,10 +47,22 @@ export function corpseSprite(type, faction, team, stage) {
 
 // ------------------------------------------------------------------ buildings
 export const BUILD_OFF = { x: B_PAD.l, y: B_PAD.t }; // draw at (tileX - x, tileY - y)
+// A building is drawn in two layers. The ground layer (trodden earth and the cast shadow) goes down
+// before any unit, tree or building, so it can never paint over a neighbour standing close by;
+// the structure itself then takes part in the depth sort.
+function buildingTop(type, faction, stage) {
+  return memo(`bt${type}${type === 'mine' ? 0 : faction}${stage}`, () => { const m = buildingModel(type, faction, stage), v = buildingView(m); return { top: render(m.prims, v), v, n: m.n }; });
+}
 function buildingImg(type, faction, stage) {
   return memo(`b${type}${type === 'mine' ? 0 : faction}${stage}`, () => {
-    const m = buildingModel(type, faction, stage), v = buildingView(m), n = m.n;
-    const im = new Img(v.w, v.h), top = render(m.prims, v);
+    const { top, v } = buildingTop(type, faction, stage), im = new Img(v.w, v.h);
+    for (let i = 0; i < top.d.length; i++) if (top.d[i] !== SHADOW) im.d[i] = top.d[i];
+    return im;
+  });
+}
+function buildingGroundImg(type, faction, stage) {
+  return memo(`bg${type}${type === 'mine' ? 0 : faction}${stage}`, () => {
+    const { top, v, n } = buildingTop(type, faction, stage), im = new Img(v.w, v.h);
     // trodden earth under and around the building
     if (type !== 'mine') {
       const D = R.dirt, cx = B_PAD.l + n * 16 - 2, cy = B_PAD.t + n * 16 + 3, rx = n * 16 + 2, ry = n * 16 + 1;
@@ -59,15 +71,15 @@ function buildingImg(type, faction, stage) {
         if (q < 0.8 || (q < 0.92 && hash2(x, y + 3) > 0.55)) im.d[y * v.w + x] = D[Math.max(2, Math.min(6, Math.round(4.1 + (hash2(x, y) - 0.5) * 1.5 + (hash2(x >> 2, y >> 2) - 0.5) * 1.3 - (q > 0.66 ? 0.8 : 0))))];
       }
     }
-    for (let i = 0; i < top.d.length; i++) {
-      const t = top.d[i]; if (!t) continue;
-      if (t === SHADOW && im.d[i]) im.d[i] = Math.max(R.dirt[0], im.d[i] - 2); else im.d[i] = t;
-    }
+    for (let i = 0; i < top.d.length; i++) if (top.d[i] === SHADOW) im.d[i] = im.d[i] ? Math.max(R.dirt[0], im.d[i] - 2) : SHADOW;
     return im;
   });
 }
 export function buildingSprite(type, faction, team, stage) {
   return memo(`b${type}${faction}${stage}/${team}`, () => buildingImg(type, faction, stage).toCanvas(lut(team)));
+}
+export function buildingGround(type, faction, stage) {
+  return memo(`bg${type}${faction}${stage}/c`, () => buildingGroundImg(type, faction, stage).toCanvas(lut(0)));
 }
 
 export function rubbleSprite(size) {

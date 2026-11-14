@@ -440,5 +440,6 @@ const FIT = [
   { hall: { scale: 1.16, dy: 12 }, farm: { scale: 1.15, dy: 4 }, barracks: { scale: 1.12, dy: 8 }, mill: { scale: 1.15, dy: 6 }, stable: { scale: 1.1, dy: 8 }, forge: { scale: 1.25, dy: 10 }, tower: { scale: 1.3, dy: 10 } },
 ];
 // sprite layout: footprint top-left is at (PADL, PADT) inside the image
-export const B_PAD = { l: 14, t: 60, r: 26, b: 8 };
+// room around the footprint for tall roofs, flags and overhanging rock (too little crops the mine's outcrop)
+export const B_PAD = { l: 22, t: 72, r: 46, b: 10 };
 export function buildingView(m) { const n = m.n; return { w: n * 32 + B_PAD.l + B_PAD.r, h: n * 32 + B_PAD.t + B_PAD.b, ox: B_PAD.l + n * 16, oy: B_PAD.t + n * 16 + (m.dy || 0), scale: m.scale || 1, yaw: m.yaw, ky: 0.74, kz: 0.8, edge: 3, edgeDark: 2, capRamp: m.capRamp }; }

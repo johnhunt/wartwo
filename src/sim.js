@@ -105,7 +105,9 @@ export class Game {
     const s = sy * W + sx;
     pf.g[s] = 0; pf.stamp[s] = gen; pf.came[s] = -1; push(s, hcost(sx, sy));
     let best = s, bestH = hcost(sx, sy), expanded = 0;
-    const limit = 6000;
+    // search the whole map when the goal can be reached on foot (long detours round lakes and forests);
+    // keep it short when it can't, where the best we can do is get close
+    const limit = this.touches(this.regionAt(sx, sy), gx - range + 1, gy - range + 1, gs + 2 * range - 2) ? W * H : 3000;
     while (hn > 0) {
       const cur = pop();
       if (pf.closed[cur] === gen) continue;
@@ -121,7 +123,7 @@ export class Game {
         const ni = ny * W + nx;
         if (pf.closed[ni] === gen) continue;
         if (!this.walkableTerrain(nx, ny) || this.bocc[ni]) continue;
-        if (avoidUnits && this.uocc[ni] && this.uocc[ni] !== selfId && this.distRect(nx, ny, sx, sy, 1) <= 7) { const ob = this.byId.get(this.uocc[ni]); if (ob && ob.mp === 0 && !ob.path) continue; } // route around units that are standing still
+        if (avoidUnits && this.uocc[ni] && this.uocc[ni] !== selfId && this.distRect(nx, ny, sx, sy, 1) <= 7) { const ob = this.byId.get(this.uocc[ni]); if (ob && ob.mp === 0 && (!ob.path || ob.wait > 8)) continue; } // route around units that are standing still or jammed
         if (d >= 4) { // no corner cutting
           if (!this.passable(cx + DIRS[d][0], cy) || !this.passable(cx, cy + DIRS[d][1])) continue;
         }
@@ -154,18 +156,29 @@ export class Game {
     if (occ && occ !== u.id) {
       u.wait++;
       const other = this.get(occ);
-      if (other && other.mp === 0 && !this.enemies(u.owner, other.owner)) {
-        // two friends walking into each other simply trade places
-        if (other.path && other.pi < other.path.length && other.path[other.pi] === this.idx(u.x, u.y)) { this.stepTo(other, u.x, u.y); other.pi++; other.wait = 0; this.stepTo(u, nx, ny); u.pi++; u.wait = 0; u.stuck = 0; return 'moving'; }
+      const friend = other && other.owner >= 0 && !this.enemies(u.owner, other.owner);
+      if (friend && other.mp === 0) {
+        const here = this.idx(u.x, u.y);
+        if (other.path && other.pi < other.path.length) {
+          // Two friends walking into each other trade places. So do two that are both jammed, as long as
+          // my tile is no further from where the other one is heading: it helps me and costs it nothing.
+          const on = other.path[other.pi]; let swap = on === here;
+          if (!swap && other.wait > 2) { const gl = other.path[other.path.length - 1], ox = gl % this.w, oy = (gl / this.w) | 0; swap = this.distRect(u.x, u.y, ox, oy, 1) <= this.distRect(other.x, other.y, ox, oy, 1); }
+          if (swap) {
+            this.stepTo(other, u.x, u.y); if (on === here) other.pi++; else other.path = null; other.wait = 0;
+            this.stepTo(u, nx, ny); u.pi++; u.wait = 0; u.stuck = 0; return 'moving';
+          }
+        }
         // an idle friend in the way steps aside
         if (!other.order && other.owner === u.owner && u.wait === 1) this.nudge(other, u);
       }
-      const still = other && other.mp === 0 && !other.path;
+      const parked = other && other.mp === 0 && !other.path, still = parked || (other && other.mp === 0 && other.wait > 8);
       // close to goal and blocked by a stationary unit: good enough
-      if (!strict && still && this.distRect(u.x, u.y, gx, gy, gs) <= range + 2 && u.wait > 3) { u.path = null; u.wait = 0; return 'arrived'; }
+      if (!strict && parked && this.distRect(u.x, u.y, gx, gy, gs) <= range + 2 && u.wait > 3) { u.path = null; u.wait = 0; return 'arrived'; }
       // look for a way round: at once if the blocker is standing still, after a moment if it is on the move
       if (still ? (u.wait === 2 || u.wait % 10 === 0) : (u.wait === 6 || u.wait % 12 === 0)) u.path = null;
-      if (u.wait > 45) { u.wait = 0; u.path = null; return 'stuck'; }
+      // queueing behind friends who are themselves on their way is not being stuck: only give up on a real dead end
+      if (u.wait > (friend && !parked ? 200 : 45)) { u.wait = 0; u.path = null; return 'stuck'; }
       return 'moving';
     }
     // step

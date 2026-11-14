@@ -139,6 +139,12 @@ export class Renderer {
       this.drawChunk(cx, cy); break pre;
     }
     const tx0 = Math.floor(this.cam.x / TILE), ty0 = Math.floor(this.cam.y / TILE), tx1 = Math.min(g.w - 1, tx0 + Math.ceil(VIEW.w / TILE) + 1), ty1 = Math.min(g.h - 1, ty0 + 15);
+    // building ground layers (earth and shadows) lie under everything that stands on the map
+    for (const e of g.ents) {
+      if (e.unit || e.dead || e.x + e.size < tx0 - 2 || e.x > tx1 + 2 || e.y + e.size < ty0 - 2 || e.y > ty1 + 4 || !this.isExplored(e)) continue;
+      const P = g.players[e.owner], d = BUILDINGS[e.type];
+      ctx.drawImage(S.buildingGround(e.type, P ? P.faction : 0, e.built ? 2 : (e.progress / d.time < 0.4 ? 0 : 1)), e.x * TILE - BO.x, e.y * TILE - BO.y);
+    }
     // ground effects
     for (const f of this.effects) {
       if (f.k === 'rubble') ctx.drawImage(S.rubbleSprite(f.size), f.x * TILE - 4, f.y * TILE - 4);
@@ -171,22 +177,23 @@ export class Renderer {
     };
     // Units going into a mine or building walk in through the wall and fade, and fade back in on the way out,
     // rather than blinking out of existence. Purely cosmetic: tracked on the render side.
-    const FADE = 240, posOf0 = posOf1;
+    // the walk in or out takes as long as that unit would take to cover the distance, so its pace doesn't change
+    const fadeMs = (e, a, b) => Math.max(120, Math.hypot(b[0] - a[0], b[1] - a[1]) / TILE * UNITS[e.type].speed * 50), posOf0 = posOf1;
     const inside = (e, b) => [Math.max(b.x, Math.min(b.x + b.size - 1, e.x)) * TILE, Math.max(b.y, Math.min(b.y + b.size - 1, e.y)) * TILE];
     for (const e of g.ents) {
       if (!e.unit || e.dead) continue;
-      if (e.hidden && !e._in) { const b = g.get(e.inside); e._in = true; e._inT = now; e._from = e._px !== undefined ? [e._px, e._py] : null; e._door = b ? inside(e, b) : null; e._bld = b ? { x: b.x, y: b.y, size: b.size } : null; }
-      else if (!e.hidden && e._in) { e._in = false; e._outT = now; e._door = e._bld ? inside(e, e._bld) : null; }
-      if (e.hidden && e._from && e._door && now - e._inT < FADE && (this.ally(e.owner) || this.visible[e.y * g.w + e.x])) {
-        const p = (now - e._inT) / FADE, x = e._from[0] + (e._door[0] - e._from[0]) * p, y = e._from[1] + (e._door[1] - e._from[1]) * p;
+      if (e.hidden && !e._in) { const b = g.get(e.inside); e._in = true; e._inT = now; e._from = e._px !== undefined ? [e._px, e._py] : null; e._door = b ? inside(e, b) : null; e._bld = b ? { x: b.x, y: b.y, size: b.size } : null; e._fade = e._from && e._door ? fadeMs(e, e._from, e._door) : 0; }
+      else if (!e.hidden && e._in) { e._in = false; e._outT = now; e._door = e._bld ? inside(e, e._bld) : null; e._fade = e._door ? fadeMs(e, e._door, [e.x * TILE, e.y * TILE]) : 0; }
+      if (e.hidden && e._from && e._door && now - e._inT < e._fade && (this.ally(e.owner) || this.visible[e.y * g.w + e.x])) {
+        const p = (now - e._inT) / e._fade, x = e._from[0] + (e._door[0] - e._from[0]) * p, y = e._from[1] + (e._door[1] - e._from[1]) * p;
         const dx = e._door[0] - e._from[0], dy = e._door[1] - e._from[1], P = g.players[e.owner];
         if (dx || dy) e._dir = Math.round(Math.atan2(-dx, dy) / (Math.PI / 4) + 8) % 8;
-        ctx.globalAlpha = 1 - p * p;
+        ctx.globalAlpha = 1 - p * p * p;
         ctx.drawImage(S.unitSprite(e.type, P.faction, P.color, 'walk' + (Math.floor(now / 100) & 3), e.carry ? e.carryKind : null, false, e._dir ?? 0), Math.round(x) - UO.x, Math.round(y) - UO.y);
         ctx.globalAlpha = 1;
       }
     }
-    const fadeIn = (e) => (e._outT && e._door && now - e._outT < FADE ? (now - e._outT) / FADE : 1);
+    const fadeIn = (e) => (e._outT && e._door && now - e._outT < e._fade ? (now - e._outT) / e._fade : 1);
     const posOf = (e) => {
       const q = posOf0(e), p = e.unit ? fadeIn(e) : 1;
       return p < 1 ? [q[0] + (e._door[0] - e.x * TILE) * (1 - p), q[1] + (e._door[1] - e.y * TILE) * (1 - p)] : q;
