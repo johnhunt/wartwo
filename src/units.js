@@ -14,8 +14,13 @@ const M_BONE = mat('bone', 1, 5);
 const M_BLACK = mat('gray', 0, 3);
 const M_CLOTH = mat('cloth', 1, 5);
 const M_ROCK = mat('rock', 2, 8);
+const M_OBSID = mat('obsid', 0, 4, { spec: 0.6, shin: 16 });
+const M_BRASS = mat('gold', 1, 7, { spec: 0.6, shin: 9 });
+const M_EMBER = mat('fire', 3, 7, { glow: 0.9 });
+// cracks in the Warband's ashen hide glow like banked coals
+const emberCrack = (lp, k = 1) => { const u = lp[0] * 0.8 + lp[2] * 1.3 + Math.sin(lp[2] * 1.1 + lp[0]) * 1.1; return Math.abs(((u % 4.6) + 4.6) % 4.6 - 2.3) < 0.34 * k && hash2(Math.floor(u / 4.6), Math.floor((lp[2] + 40) / 7)) > 0.45; };
 const M_STRING = mat('bone', 3, 5, { noShadow: true });
-const skinM = (f) => f ? mat('gskin', 1, 7) : mat('skin', 1, 7);
+const skinM = (f) => f ? mat('gskin', 1, 7, { tex: (lp) => (emberCrack(lp, 0.8) ? { ramp: 'fire', abs: 0.45 } : 0) }) : mat('skin', 1, 7);
 
 // ---------------------------------------------------------------- poses
 // leg swing s in -1..1 (left leg forward when positive), lift = which foot is off the ground
@@ -89,7 +94,8 @@ function torsoMat(look, f) {
   const sk = f ? 'gskin' : 'skin';
   switch (look.torso) {
     case 'plate': return mat('steel', 0, 8, { spec: 0.4, shin: 10, tex: (lp) => {
-      if (lp[2] < -3.2 && lp[2] > -4.6) return { ramp: 'leather', lo: 0, hi: 4 };
+      if (lp[2] < -3.2 && lp[2] > -4.6) return { ramp: 'gold', lo: 1, hi: 7, d: 0.1 }; // brass belt
+      if (lp[2] > 4.4) return { ramp: 'gold', lo: 1, hi: 7, d: 0.05 }; // gorget
       if (lp[2] <= -4.6) return { ramp: 'team', d: (Math.floor(lp[0] + 20) & 1) ? 0.06 : -0.06 }; // tabard skirt
       if (lp[1] > 0 && Math.abs(lp[0]) < 2.1 && lp[2] < 3.6) return { ramp: 'team', d: 0.12 }; // tabard
       return 0;
@@ -104,6 +110,7 @@ function torsoMat(look, f) {
     default: return mat(sk, 1, 7, { tex: (lp) => { // bare chest with harness
       if (lp[2] < -2.8) return { ramp: 'leather', lo: 0, hi: 5, d: Math.abs(lp[0]) < 1.2 && lp[1] > 0 && lp[2] > -4.4 ? 0.3 : 0 };
       if (lp[1] > 0 && Math.abs(Math.abs(lp[0]) - (2.5 - lp[2] * 0.45)) < 0.9 && lp[2] > -2.8) return { ramp: 'leather', lo: 0, hi: 4 };
+      if (f && emberCrack(lp)) return { ramp: 'fire', abs: 0.55 };
       if (lp[1] > 2 && lp[2] > 0.4 && lp[2] < 1.3 && Math.abs(lp[0]) > 0.6) return -0.14; // pecs
       return 0;
     } });
@@ -114,16 +121,18 @@ function weaponPrims(kind, hand, d, f, opt = {}) {
   const P = [], at = (k) => add(hand, scl(d, k));
   const side = norm([d[1] * 0 - d[2] * 0 + 1, 0.05, 0]); // roughly x
   switch (kind) {
-    case 'sword':
-      P.push(cap(at(-2.4), at(1.2), 0.85, M_DLEATHER), sph(at(-2.9), 1.15, M_GOLD));
+    case 'sword': // broad, leaf-bladed, brass hilted
+      P.push(cap(at(-2.4), at(1.2), 0.85, M_DLEATHER), sph(at(-2.9), 1.3, M_BRASS));
       P.push(cap(add(at(1.6), [-2.4, 0, 0]), add(at(1.6), [2.4, 0, 0]), 0.9, M_GOLD));
-      P.push(box(at(8.6), [1.25, 0.55, 6.6], M_STEEL, aim(d)), sph(at(15.4), [1.1, 0.5, 1.6], M_STEEL, aim(d)));
+      P.push(sph(at(9), [1.9, 0.55, 7.6], M_STEEL, aim(d)));
       break;
     case 'axe': {
       P.push(cap(at(-4), at(11), 0.85, M_DWOOD));
       const M = aim(d, opt.flat || [0, 1, 0]);
       const bm = f ? M_DSTEEL : M_STEEL;
-      P.push(sph(at(9.6), [4.6, 0.75, 3.5], mat('steel', 0, 9, { spec: 0.5, tex: (lp) => (lp[0] * lp[0] / 21 + lp[2] * lp[2] / 12 > 0.62 ? 0.28 : -0.12) }), M));
+      // Vale forges steel; the Warband knaps volcanic glass whose edge still glows
+      const head = f ? mat('obsid', 0, 3, { spec: 0.45, shin: 16, tex: (lp) => (lp[0] * lp[0] / 30 + lp[2] * lp[2] / 17 > 0.7 ? { ramp: 'fire', abs: 0.85 } : 0) }) : mat('steel', 0, 9, { spec: 0.5, tex: (lp) => (lp[0] * lp[0] / 21 + lp[2] * lp[2] / 12 > 0.62 ? 0.28 : -0.12) });
+      P.push(sph(at(9.6), f ? [5.6, 0.8, 4.2] : [4.6, 0.75, 3.5], head, M));
       P.push(sph(at(9.6), [1.5, 1.2, 2.2], bm, M), sph(at(11.6), 0.9, M_BONE));
       break;
     }
@@ -141,7 +150,7 @@ function weaponPrims(kind, hand, d, f, opt = {}) {
       break;
     }
     case 'spear':
-      P.push(cap(at(-13), at(15), 0.75, M_WOOD), sph(at(17.5), [1.3, 0.8, 3.2], mat('bone', 2, 5, { spec: 0.3 }), aim(d)), cap(at(13.6), at(14.6), 1.1, M_TEAM));
+      P.push(cap(at(-13), at(15), 0.75, M_WOOD), sph(at(17.8), [1.6, 0.8, 3.8], M_OBSID, aim(d)), sph(at(14.8), 1.0, M_EMBER), cap(at(13.6), at(14.6), 1.1, M_TEAM));
       break;
     case 'lance':
       P.push(cap(at(-9), at(22), 0.8, M_WOOD), sph(at(24.5), [1.1, 1.1, 3.2], M_STEEL, aim(d)), fru(at(0.5), 2.3, 0.9, 3, M_STEEL, aim(d)));
@@ -160,7 +169,7 @@ function humanoid(look, f, frame, carry) {
   const atk = frame.startsWith('atk') ? +frame[3] : -1;
   const lean = atk === 1 ? 1.6 : atk === 2 ? 2.2 : atk === 0 ? -0.8 : (f ? 1 : 0); // forward lean of the chest
   const hipW = 2.7 + b * 0.5, shW = 6.6 + b * 1.5;
-  const pants = f ? M_DLEATHER : (look.torso === 'plate' ? M_DSTEEL : mat('leather', 1, 5));
+  const pants = f ? mat('char', 1, 5) : (look.torso === 'plate' ? M_DSTEEL : mat('leather', 1, 5));
   const boot = f ? mat('leather', 0, 3) : (look.torso === 'plate' ? M_STEEL : mat('leather', 0, 4));
   // legs
   for (const sgn of [-1, 1]) {
@@ -179,7 +188,7 @@ function humanoid(look, f, frame, carry) {
   if (look.quiver) { P.push(cap([3, -3.6, 15 + z0], [5.2, -4.4, 24.5 + z0], 1.7, M_DLEATHER)); for (const k of [-1, 0, 1]) P.push(cap([5.2 + k, -4.4, 24.5 + z0], [5.6 + k * 1.3, -4.6, 27.5 + z0], 0.55, k ? M_CLOTH : M_TEAM)); }
   // head
   const hc = [0, 0.7 + lean * 0.9 + (f ? 1.6 : 0), 27.2 + z0 - (f ? 1.3 : 0)];
-  const hr = look.head === 'helm' || look.head === 'greathelm' || look.head === 'hood' ? 4.7 : 4.3;
+  const hr = look.head === 'helm' || look.head === 'greathelm' || look.head === 'hood' ? 5.2 : 4.8; // big heads read at this size
   const headBase = look.head === 'helm' || look.head === 'greathelm' ? mat('steel', 0, 8, { spec: 0.45, shin: 9 }) : mat(sn, 1, 7);
   P.push(sph(hc, hr, Object.assign({}, headBase, { tex: headTex(look, f) })));
   if (f) { // jaw, tusks, ears
@@ -188,13 +197,29 @@ function humanoid(look, f, frame, carry) {
   } else if (look.head !== 'greathelm' && look.head !== 'helm') P.push(sph(add(hc, [0, 4.1, -0.9]), 0.9, sk)); // nose
   switch (look.head) {
     case 'cap': P.push(fru(add(hc, [0, 0, 1.7]), 6.8, 6.2, 0.9, mat('straw', 1, 7, { tex: TEX.streaks(0.2) })), fru(add(hc, [0, 0, 2.6]), 3.9, 2.6, 2.6, mat('straw', 2, 7))); break;
-    case 'helm': P.push(sph(add(hc, [0, -0.6, 4.6]), [0.9, 3.4, 1.9], M_TEAM)); break;
-    case 'greathelm': P.push(sph(add(hc, [0, -1.5, 5.2]), [1.1, 3.8, 3], M_TEAM), fru(add(hc, [0, 0, 3.6]), 1.2, 0.8, 1.6, M_GOLD)); break;
-    case 'hood': P.push(sph(add(hc, [0, -2.6, 2.6]), [2.6, 2.4, 2.2], mat('team', 0, 6))); break;
-    case 'horn': for (const s of [-1, 1]) { P.push(cap(add(hc, [s * 3.6, 0, 2.2]), add(hc, [s * 6.6, 0.5, 3.6]), 1.15, M_BONE), cap(add(hc, [s * 6.6, 0.5, 3.6]), add(hc, [s * 7.4, 1, 6.6]), 0.75, M_BONE)); } break;
+    case 'helm': // kettle helm with a brass brim and a tall plume that trails behind
+      P.push(fru(add(hc, [0, 0, 1.4]), 6.4, 5.6, 0.9, M_BRASS), fru(add(hc, [0, 0, 4.6]), 1.1, 0.7, 1.6, M_BRASS));
+      P.push(sph(add(hc, [0, -0.8, 8.4]), [1.3, 1.9, 3.4], M_TEAM), sph(add(hc, [0, -3, 8.2]), [1.2, 2, 2.6], M_TEAM), sph(add(hc, [0, -5, 6.4]), [1.1, 1.8, 2.2], M_TEAM), sph(add(hc, [0, -6.4, 4]), [0.9, 1.4, 1.9], M_TEAM));
+      break;
+    case 'greathelm': // winged helm
+      P.push(fru(add(hc, [0, 0, 4]), 1.4, 0.4, 3.4, M_BRASS), sph(add(hc, [0, 0.4, 0.9]), [5.5, 5.4, 0.9], M_BRASS));
+      for (const k of [-1, 1]) P.push(sph(add(hc, [k * 5.6, -1.2, 5.2]), [0.9, 2.4, 4.6], M_TEAM, rot(0, 0, k * 28)), sph(add(hc, [k * 6.6, -2.6, 4]), [0.7, 2, 3.4], M_BRASS, rot(0, 0, k * 40)));
+      break;
+    case 'hood': // long-tailed hood with a pheasant feather
+      P.push(fru(add(hc, [0, -1, 3.4]), 3.6, 0.6, 5.4, mat('team', 0, 6), rot(0, -52, 0)), cap(add(hc, [0, -5.4, 6.2]), add(hc, [0, -7.6, 1.6]), 1.1, mat('team', 0, 5)), sph(add(hc, [0, -7.8, 0.6]), 1.3, M_BRASS));
+      P.push(cap(add(hc, [3.4, 0.6, 3]), add(hc, [5.6, -3, 9.6]), 0.6, mat('autumn', 3, 7)));
+      break;
+    case 'horn': // sweeping ram horns
+      for (const s of [-1, 1]) { P.push(cap(add(hc, [s * 3.6, -0.6, 2.6]), add(hc, [s * 7.4, -1.6, 4.6]), 1.6, M_BONE), cap(add(hc, [s * 7.4, -1.6, 4.6]), add(hc, [s * 9.2, 0.6, 2]), 1.25, M_BONE), cap(add(hc, [s * 9.2, 0.6, 2]), add(hc, [s * 8.2, 3, 0.2]), 0.8, M_BONE)); }
+      break;
     case 'skull': P.push(sph(add(hc, [0, -0.2, 2.2]), [3.9, 4.2, 2.9], mat('bone', 1, 5, { tex: (lp) => lp[1] > 2 && lp[2] < 0.6 && Math.abs(lp[0]) > 0.7 && Math.abs(lp[0]) < 2.7 ? { ramp: 'gray', abs: 0 } : 0 }))); for (const s of [-1, 1]) P.push(cap(add(hc, [s * 3.2, 0, 3.2]), add(hc, [s * 5.4, -1, 6.8]), 0.8, M_BONE)); break;
-    case 'mohawk': for (let k = 0; k < 5; k++) P.push(sph(add(hc, [0, 2.6 - k * 1.5, 3.9 + (k === 1 || k === 2 ? 1.2 : 0.3)]), [0.9, 1.3, 2.2], M_TEAM)); break;
-    case 'bald': P.push(sph(add(hc, [0, -0.5, 3.4]), [1.2, 2.6, 1.3], M_BLACK)); break;
+    case 'mohawk': // a crest of stiffened hair like a flame
+      for (let k = 0; k < 6; k++) P.push(fru(add(hc, [0, 3 - k * 1.5, 3.4]), 1.3, 0, 4.2 + (k === 1 || k === 2 ? 2.6 : k === 3 ? 1.4 : 0), k % 2 ? M_TEAM : mat('team', 3, 7), rot(0, -14 - k * 5, 0)));
+      break;
+    case 'bald': // a drudge's topknot bound in team cloth, and stubby horn buds
+      P.push(sph(add(hc, [0, -1.6, 4.6]), [1.5, 1.7, 2.4], M_BLACK), fru(add(hc, [0, -1.6, 3.6]), 1.7, 1.5, 1.2, M_TEAM));
+      for (const s of [-1, 1]) P.push(fru(add(hc, [s * 3.2, 0.8, 3]), 1, 0, 2.4, M_BONE, rot(0, 0, s * -30)));
+      break;
   }
   // arms. right arm = -x (weapon), left arm = +x (shield / bow)
   const shz = 21.6 + z0, RS = [-shW, lean * 0.6, shz], LS = [shW, lean * 0.6, shz];
@@ -246,17 +271,18 @@ function humanoid(look, f, frame, carry) {
   P.push(cap(RS, RE, armR, sleeve), cap(RE, RH, armR - 0.25, f || look.torso !== 'plate' ? sk : M_DSTEEL), sph(RH, 2.05, look.torso === 'plate' ? M_DLEATHER : sk));
   P.push(cap(LS, LE, armR, sleeve), cap(LE, LH, armR - 0.25, f || look.torso !== 'plate' ? sk : M_DSTEEL), sph(LH, 2.05, look.torso === 'plate' ? M_DLEATHER : sk));
   if (look.pauldron) {
-    if (f) { P.push(sph(add(RS, [-0.4, 0, 1.2]), [3.6, 3.3, 2.9], M_TEAM)); P.push(fru(add(RS, [-0.8, 0, 3.2]), 1.3, 0, 3.6, M_BONE, rot(0, 0, -25))); P.push(sph(add(LS, [0.4, 0, 0.8]), [3.2, 3, 2.5], M_DLEATHER)); }
-    else for (const S of [RS, LS]) P.push(sph(add(S, [0, 0, 1.1]), [3.3, 3.2, 2.7], mat('steel', 1, 8, { spec: 0.5, shin: 9 })));
+    if (f) { P.push(sph(add(RS, [-0.4, 0, 1.2]), [3.6, 3.3, 2.9], M_TEAM)); P.push(fru(add(RS, [-0.8, 0, 3]), 1.6, 0, 5.4, M_OBSID, rot(0, 0, -25))); P.push(sph(add(LS, [0.4, 0, 0.8]), [3.2, 3, 2.5], M_DLEATHER)); }
+    else for (const S of [RS, LS]) P.push(sph(add(S, [0, 0, 1.1]), [3.6, 3.4, 2.8], M_BRASS));
   }
   if (wd && W) P.push(...weaponPrims(W, RH, wd, f, wopt));
   if (look.shield && !carry) {
     const sc = add(LH, [1.8, 1.2, 1.8]), M = rot(mount ? -62 : -38, 4, 0);
-    P.push(sph(sc, [5.2, 1.3, 6.4], mat('team', 1, 7, { spec: 0.2, tex: (lp) => {
+    P.push(sph(sc, [6, 1.3, 6.2], mat('team', 1, 7, { spec: 0.2, tex: (lp) => {
       const r = lp[0] * lp[0] / 27 + lp[2] * lp[2] / 41;
-      if (r > 0.7) return { ramp: 'steel', d: 0.1 };
-      if (lp[0] * lp[0] + lp[2] * lp[2] < 2.6) return { ramp: 'gold', d: 0.25 };
-      if (Math.abs(lp[0]) < 0.8 || Math.abs(lp[2] - 0.6) < 0.8) return { ramp: 'cloth', lo: 3, hi: 5, d: 0.2 }; // cross
+      if (r > 0.72) return { ramp: 'gold', d: 0.1 };
+      const q = lp[0] * lp[0] + lp[2] * lp[2];
+      if (q < 3.4) return { ramp: 'gold', d: 0.3 };
+      if (q < 17 && Math.abs(Math.sin(Math.atan2(lp[2], lp[0]) * 4)) > 0.72) return { ramp: 'gold', d: 0.1 }; // the rising sun of Vale
       return 0;
     } }), M));
   }
@@ -265,14 +291,14 @@ function humanoid(look, f, frame, carry) {
 
 function horse(frame, f) {
   const P = [], wp = walkPose(frame), s = wp.s, bob = wp.bob * 0.6;
-  const coat = mat('wood', 1, 7, { tex: (lp) => (hash2(lp[0] * 1.5, lp[1] * 1.5 + lp[2]) - 0.5) * 0.06 });
-  const dark = mat('gray', 0, 4);
+  const coat = mat('cloth', 1, 5, { tex: (lp) => (hash2(lp[0] * 0.5, lp[1] * 0.5 + lp[2] * 0.4) > 0.62 ? -0.16 : 0) }); // Vale greys, dappled
+  const dark = mat('slate', 0, 4);
   const z = 14.5 + bob;
   P.push(sph([0, -1, z], [4.7, 9.6, 5.1], coat), sph([0, 6.6, z + 0.6], [4.6, 4.8, 5.5], coat), sph([0, -7.6, z + 0.4], [4.9, 4.6, 5.2], coat));
   const nb = [0, 9, z + 3], nt = [0, 13.2, z + 9.6];
   P.push(cap(nb, nt, 2.9, coat), cap(add(nb, [0, -2.6, 2.4]), add(nt, [0, -2.2, 1.6]), 1.5, dark)); // neck + mane
   const hd = rot(0, -34, 0);
-  P.push(sph([0, 15.6, z + 9.4], [2.4, 4.9, 2.7], coat, hd), sph([0, 18.2, z + 7.4], [1.9, 2.2, 1.9], mat('wood', 0, 4), hd));
+  P.push(sph([0, 15.6, z + 9.4], [2.4, 4.9, 2.7], coat, hd), sph([0, 18.2, z + 7.4], [1.9, 2.2, 1.9], mat('cloth', 0, 3), hd), sph([0, 15.2, z + 11], [1.7, 3.2, 1.2], M_BRASS, hd), fru([0, 13.6, z + 12.4], 0.8, 0, 3.4, M_TEAM));
   for (const k of [-1, 1]) P.push(fru([k * 1.5, 13, z + 11.6], 0.95, 0, 2.4, coat), sph([k * 2.1, 15.9, z + 10.2], 0.62, mat('gray', 0, 1)));
   P.push(cap([0, -11.6, z + 2], [0, -14.6, z - 4.5], 1.6, dark), cap([0, -14.6, z - 4.5], [0, -14.2, z - 9], 1.2, dark)); // tail
   // legs: diagonal pairs move together
@@ -307,9 +333,9 @@ function wolf(frame) {
 
 function siege(frame, f) {
   const P = [], atk = frame.startsWith('atk') ? +frame[3] : -1, wi = frame.startsWith('walk') ? +frame[4] : 0;
-  const wood = f ? mat('leather', 1, 6, { tex: TEX.boards(3) }) : mat('wood', 2, 8, { tex: TEX.boards(3) });
-  const beam = f ? mat('leather', 1, 5) : mat('wood', 2, 7);
-  const iron = f ? M_BONE : M_DSTEEL;
+  const wood = f ? mat('char', 1, 5, { tex: TEX.boards(3) }) : mat('wood', 2, 8, { tex: TEX.boards(3) });
+  const beam = f ? mat('char', 1, 5) : mat('wood', 2, 7);
+  const iron = f ? M_BONE : M_BRASS;
   P.push(slab([0, 0, 4.6], [6.4, 12, 1.5], wood));
   P.push(slab([0, 9.5, 7.6], [6.4, 1.2, 1.2], beam), slab([0, -9.5, 7.6], [6.4, 1.2, 1.2], beam));
   const wm = mat(f ? 'leather' : 'wood', 1, 7, { tex: (lp) => {
@@ -326,7 +352,7 @@ function siege(frame, f) {
   const dir = atk === 1 ? norm([0, 0.2, 0.98]) : atk === 2 ? norm([0, 0.1, 0.99]) : norm([0, -0.86, 0.5]);
   const tip = add(piv, scl(dir, 17));
   P.push(cap(piv, tip, 1.2, beam), sph(tip, [3, 3, 1.6], iron, aim(add(scl(dir, 0.2), atk >= 1 ? [0, 1, 0] : [0, 0.4, 1]))));
-  if (atk < 1) P.push(sph(add(tip, [0, 0.4, 2.2]), 2.5, mat('rock', 2, 8, { tex: TEX.noise(0.3, 1.5) })));
+  if (atk < 1) P.push(sph(add(tip, [0, 0.4, 2.2]), 2.5, f ? mat('char', 1, 5, { tex: (lp) => (hash2(lp[0] * 2, lp[1] * 2 + lp[2]) > 0.6 ? { ramp: 'fire', abs: 0.85 } : 0) }) : mat('rock', 2, 8, { tex: TEX.noise(0.3, 1.5) })));
   // team colours
   P.push(slab([0, 12.2, 5.2], [4.6, 0.5, 2.1], M_TEAM), slab([0, -12.2, 5.2], [4.6, 0.5, 2.1], M_TEAM));
   if (f) { for (const x of [-4.5, -1.5, 1.5, 4.5]) P.push(fru([x, 12.4, 6.2], 1, 0, 4.4, M_BONE, rot(0, 62, 0))); P.push(sph([0, 1.5, 21.6], [2.1, 2, 2.2], M_BONE)); }

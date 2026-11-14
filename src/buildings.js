@@ -4,20 +4,22 @@ import { sph, cap, box, slab, fru, roof, cvx, mat, rot, aim, xform, add, scl, no
 
 export const B_SIZE = { hall: 4, farm: 2, barracks: 3, mill: 3, stable: 3, forge: 3, tower: 2, mine: 3 };
 
-const STONE = mat('stone', 1, 8, { tex: TEX.brick(8, 4, 0.2) });
-const DSTONE = mat('stone', 0, 6, { tex: TEX.brick(8, 4, 0.18) });
+const STONE = mat('stone', 2, 9, { tex: TEX.brick(8, 4, 0.2) }); // pale ivory limestone
+const DSTONE = mat('stone', 1, 7, { tex: TEX.brick(8, 4, 0.18) });
 const CAPSTONE = mat('stone', 3, 9);
 const SLATE = mat('slate', 0, 6, { tex: TEX.shingles(5, 3, 0.2) });
 const TEAMROOF = mat('team', 1, 7, { tex: TEX.shingles(5, 3, 0.16) });
 const TEAM = mat('team', 1, 7);
 const WOODROOF = mat('wood', 1, 7, { tex: TEX.shingles(4, 3, 0.2) });
 const THATCH = mat('straw', 1, 7, { tex: TEX.thatch() });
-const THATCHC = mat('straw', 1, 7, { tex: TEX.streaks(0.3) });
-const HIDE = mat('leather', 1, 7, { tex: TEX.streaks(0.2) });
+const THATCHC = mat('fur', 1, 6, { tex: TEX.streaks(0.34) }); // shaggy smoke-blackened thatch
+const HIDE = mat('leather', 0, 5, { tex: TEX.streaks(0.26) }); // smoke-darkened oxblood hides
 const PLANK = mat('wood', 2, 7, { tex: TEX.planks(4, 0.2) });
 const DPLANK = mat('wood', 0, 5, { tex: TEX.planks(3, 0.2) });
 const LOGW = mat('wood', 1, 7, { tex: TEX.logs(4) });
-const DLOGW = mat('leather', 0, 5, { tex: TEX.logs(4) });
+const DLOGW = mat('char', 0, 5, { tex: TEX.logs(4) }); // charred logs
+const OBSID = mat('obsid', 0, 4, { spec: 1.1, shin: 16 });
+const EMBER = mat('fire', 2, 7, { glow: 0.9, tex: (lp) => ({ d: (hash2(lp[0] * 3, lp[1] * 3 + lp[2] * 2) - 0.5) * 0.6 }) });
 const BEAM = mat('wood', 1, 6);
 const DBEAM = mat('wood', 0, 4);
 const BONE = mat('bone', 1, 5);
@@ -52,10 +54,10 @@ const FRONT = rot(0, -90, 0); // local z -> +y
 const SIDE = rot(0, 0, 90); // local z -> +x
 
 // details on a south-facing wall at y = yf
-function win(x, yf, z, hw = 1.6, hh = 2.6, lit = false) {
+function win(x, yf, z, hw = 1.6, hh = 2.6, lit = true) { // Vale keeps its lamps burning
   return [box([x, yf + 0.25, z], [hw + 0.9, 0.3, hh + 0.9], CAPSTONE), box([x, yf + 0.5, z], [hw, 0.3, hh], lit ? GLOWWIN : DARK)];
 }
-function winE(xf, y, z, hw = 1.6, hh = 2.6) { return [box([xf + 0.25, y, z], [0.3, hw + 0.9, hh + 0.9], CAPSTONE), box([xf + 0.5, y, z], [0.3, hw, hh], DARK)]; }
+function winE(xf, y, z, hw = 1.6, hh = 2.6) { return [box([xf + 0.25, y, z], [0.3, hw + 0.9, hh + 0.9], CAPSTONE), box([xf + 0.5, y, z], [0.3, hw, hh], GLOWWIN)]; }
 function door(x, yf, hw, h, m = DPLANK, frame = CAPSTONE) {
   return [
     box([x, yf + 0.3, h / 2 + 0.5], [hw + 1.6, 0.4, h / 2 + 0.5], frame), fru([x, yf - 0.1, h], hw + 1.6, hw + 1.6, 0.8, frame, FRONT),
@@ -82,12 +84,33 @@ function roundTower(x, y, r, h, roofH, roofMat = TEAMROOF) {
   P.push(fru([x, y, h - 1], r, r + 2.2, 3, CAPSTONE), fru([x, y, h + 2], r + 2.2, r + 2.2, 2.4, STONE));
   for (let a = 0; a < 8; a++) { const an = a * Math.PI / 4 + 0.2; P.push(box([x + Math.cos(an) * (r + 1), y + Math.sin(an) * (r + 1), h + 6], [1.5, 1.5, 1.8], CAPSTONE, rot(an * 180 / Math.PI))); }
   for (const dz of [0.45, 0.72]) P.push(box([x - r * 0.3, y + r * 0.95 + 0.3, h * dz], [0.8, 0.5, 2.4], DARK));
-  if (roofH) P.push(...late([fru([x, y, h + 4.4], r + 1.2, 0.3, roofH, roofMat), sph([x, y, h + 4.4 + roofH], 1.2, GOLD)]));
+  if (roofH) P.push(...late([...hat(x, y, h + 4.4, r + 1.2, roofH, roofMat), sph([x, y, h + 4.4 + roofH], 1.2, GOLD)]));
   return P;
+}
+// Vale's signature roof: a wide flared skirt under a steep, slightly crooked spire
+function hat(x, y, z, r, h, m = TEAMROOF) {
+  return [fru([x, y, z - 0.8], r + 3.4, r + 2.8, 1, GOLD), fru([x, y, z], r + 2.8, r * 0.46, h * 0.4, m), fru([x, y, z + h * 0.4], r * 0.46, 0.3, h * 0.6, m, rot(0, 0, 4))];
+}
+// bell-cast gable roof: a shallow flared eave below, a steep pitch above, brass finials on the ridge
+function vroof(cn, hx, hy, hz, m, M = ID, inset = 0) {
+  const up = [cn[0], cn[1], cn[2] + hz * 0.22];
+  const P = [roof(cn, hx + 2, hy + 3.6, hz * 0.5, m, M, inset ? inset + 2 : 0), roof(up, hx, hy * 0.62, hz * 0.78, m, M, inset)];
+  const e = hx - (inset || 0) * 0.9, ax = [M[0], M[3], M[6]];
+  for (const k of [-1, 1]) P.push(fru(add(cn, add(scl(ax, k * e), [0, 0, hz - 0.5])), 1.1, 0, 5.5, GOLD), sph(add(cn, add(scl(ax, k * e), [0, 0, hz + 0.4])), 1.5, GOLD));
+  return P;
+}
+// a lamp post: Vale lights its doors
+function lantern(x, y, h = 13) {
+  return [cap([x, y, 0], [x, y, h], 0.7, IRON), cap([x, y, h], [x + 2.6, y, h + 1], 0.55, IRON), box([x + 2.8, y, h - 1.6], [1.5, 1.5, 1.9], GLOWWIN), fru([x + 2.8, y, h + 0.2], 2.3, 0.3, 2, GOLD)];
+}
+// a splinter of volcanic glass: the Warband raises them wherever it settles
+function shard(x, y, h, lean = 0, r = 0) {
+  r = r || h * 0.22;
+  return [fru([x, y, 0], r, 0, h, OBSID, rot(lean * 37, lean * 9, lean * 13)), fru([x + r * 0.9, y + r * 0.5, 0], r * 0.6, 0, h * 0.55, OBSID, rot(0, -8, 16 - lean * 20))];
 }
 function palisade(x0, y0, x1, y1, h = 14, m = DLOGW, step = 4.6) {
   const P = [], n = Math.max(1, Math.round(Math.hypot(x1 - x0, y1 - y0) / step));
-  for (let i = 0; i <= n; i++) { const t = i / n, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t, hh = h + (hash2(i, x0 + y0) - 0.5) * 3; P.push(fru([x, y, 0], 2.4, 2.2, hh - 3.4, m), fru([x, y, hh - 3.4], 2.2, 0.2, 3.6, mat('wood', 3, 8))); }
+  for (let i = 0; i <= n; i++) { const t = i / n, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t, hh = h + (hash2(i, x0 + y0) - 0.5) * 3; P.push(fru([x, y, 0], 2.4, 2.2, hh - 3.4, m), fru([x, y, hh - 3.4], 2.2, 0.2, 4.6, BONE)); }
   return P;
 }
 function tusk(x, y, z, h, lean = 1, r = 2.2) { // curved bone tusk rising from the ground
@@ -127,63 +150,63 @@ const KINGDOM = {
     const P = [], cy = 14;
     P.push(slab([0, cy, 0], [38, 23, 17], STONE));
     P.push(slab([0, cy, 34], [38.6, 23.6, 1.2], CAPSTONE));
-    P.push(...late(roof([0, cy, 36.4], 41, 26, 20, SLATE, ID, 22)));
+    P.push(...late(vroof([0, cy, 36.4], 41, 26, 20, SLATE, ID, 22)));
     P.push(...late(cap([-19, cy, 56.6], [19, cy, 56.6], 1, GOLD)));
     for (const x of [-27, -15, 15, 27]) P.push(...win(x, cy + 23, 22, 1.7, 3.4, x === 15));
     for (const y of [cy - 8, cy + 8]) P.push(...winE(38, y, 22, 1.7, 3.4));
     // gatehouse
-    P.push(slab([0, cy + 27, 0], [11, 5, 15], STONE), ...late(roof([0, cy + 27, 30], 7.5, 13, 11, TEAMROOF, rot(90))));
+    P.push(slab([0, cy + 27, 0], [11, 5, 15], STONE), ...late(vroof([0, cy + 27, 30], 7.5, 13, 11, TEAMROOF, rot(90))));
     P.push(...door(0, cy + 32, 5.6, 15.5));
     P.push(...late(box([0, cy + 32.6, 25.6], [2.6, 0.4, 2.6], GOLD, rot(0, 0, 45))));
     P.push(slab([0, cy + 36, 0], [9, 3, 0.8], CAPSTONE), slab([0, cy + 40, 0], [11, 2.4, 0.4], CAPSTONE));
     // front corner towers
-    P.push(...roundTower(-38, cy + 20, 10.5, 46, 22), ...roundTower(38, cy + 20, 10.5, 46, 22));
-    P.push(...flag(-38, cy + 20, 72, 13), ...flag(38, cy + 20, 72, 13));
+    P.push(...roundTower(-38, cy + 20, 10.5, 46, 31), ...roundTower(38, cy + 20, 10.5, 46, 31));
+    P.push(...flag(-38, cy + 20, 81, 12), ...flag(38, cy + 20, 81, 12));
     // great tower at the back
     P.push(slab([-12, cy - 15, 0], [13, 12, 37], DSTONE), slab([-12, cy - 15, 74], [14.6, 13.6, 1.5], CAPSTONE), ...crenel(-12, cy - 15, 14.6, 13.6, 77));
     P.push(...win(-12, cy - 3, 62, 1.8, 4), ...winE(1, cy - 15, 62, 1.8, 4));
-    P.push(...late(fru([-12, cy - 15, 77], 7, 0.4, 16, TEAMROOF)), ...flag(-12, cy - 15, 92, 16, 10));
-    P.push(...banner(-22, cy + 23.2, 22, 2.6, 6), ...banner(22, cy + 23.2, 22, 2.6, 6));
+    P.push(...late(hat(-12, cy - 15, 77, 9, 24, TEAMROOF)), ...flag(-12, cy - 15, 100, 13, 10));
+    P.push(...banner(-22, cy + 23.2, 22, 2.6, 6), ...banner(22, cy + 23.2, 22, 2.6, 6), ...lantern(-12, cy + 42, 15), ...lantern(14, cy + 42, 15));
     return P;
   },
   farm() {
     const P = [];
-    P.push(slab([-6, -6, 0], [15, 10, 7.5], TIMBER), ...late(roof([-6, -6, 15], 17.5, 13, 13, THATCH)));
+    P.push(slab([-6, -6, 0], [15, 10, 7.5], TIMBER), ...late(vroof([-6, -6, 15], 17.5, 13, 13, THATCH)));
     P.push(...door(-10, 4, 3.2, 9, DPLANK, BEAM), ...win(1.5, 4, 8.5, 1.6, 2, true));
     P.push(...late(chimney(-15, -9, 14, 13)));
     // crop rows
     P.push(slab([8, 22, 0], [21, 9.5, 0.5], mat('dirt', 0, 5, { tex: (lp) => { const k = ((lp[1] + 100) % 4.8); return k < 2.6 ? { ramp: 'straw', lo: 2, hi: 7, d: (hash2(Math.floor(lp[0] * 1.7), Math.floor(lp[1])) - 0.5) * 0.7 + 0.1 } : (hash2(lp[0], lp[1]) - 0.5) * 0.2; } })));
     for (let i = 0; i < 12; i++) P.push(sph([-10 + (i % 6) * 7.4, 18 + ((i / 6) | 0) * 9.6, 1.8], [1.5, 1.2, 2.6], mat('straw', 3, 7, { tex: TEX.noise(0.4, 2) })));
-    P.push(...hayBale(21, -4, 5.4), ...fence(-26, 12, -26, 32), ...fence(-26, 32, 29, 32));
+    P.push(...hayBale(21, -4, 5.4), ...fence(-26, 12, -26, 32), ...fence(-26, 32, 29, 32), ...lantern(-17, 8, 11));
     P.push(...flag(13, -12, 0, 30, 7));
     return P;
   },
   barracks() {
     const P = [], cy = 6;
     P.push(slab([-4, cy, 0], [32, 17, 13], STONE), slab([-4, cy, 26], [32.6, 17.6, 1], CAPSTONE));
-    P.push(...late(roof([-4, cy, 28], 35, 20, 17, SLATE)), ...late(cap([-39, cy, 45], [31, cy, 45], 1, CAPSTONE)));
+    P.push(...late(vroof([-4, cy, 28], 35, 20, 17, SLATE)), ...late(cap([-39, cy, 45], [31, cy, 45], 1, CAPSTONE)));
     for (const x of [-27, -17, 9, 19]) P.push(...win(x, cy + 17, 17, 1.5, 3, x === -17));
     P.push(...winE(28, cy, 17, 1.6, 3));
     P.push(...door(-4, cy + 17, 6.4, 15));
     P.push(...late(box([-4, cy + 17.9, 21.6], [3.2, 0.3, 3], mat('team', 1, 7, { tex: (lp) => (Math.abs(lp[0] - lp[2]) < 0.75 || Math.abs(lp[0] + lp[2]) < 0.75 ? { ramp: 'steel', d: 0.3 } : 0) }))));
     // corner turret
-    P.push(...roundTower(31, cy + 13, 9, 38, 17));
-    P.push(...flag(31, cy + 13, 59, 12));
+    P.push(...roundTower(31, cy + 13, 9, 38, 25));
+    P.push(...flag(31, cy + 13, 67, 11));
     P.push(...banner(-22, cy + 17.2, 16, 2.4, 5.4));
     // training yard: weapon rack, target dummy
     P.push(cap([-33, 31, 0], [-33, 31, 9], 0.8, BEAM), cap([-20, 31, 0], [-20, 31, 9], 0.8, BEAM), cap([-34, 31, 8], [-19, 31, 8], 0.7, BEAM));
     for (const x of [-30, -26.5, -23]) P.push(cap([x, 32, 1], [x, 31.6, 14], 0.5, x === -26.5 ? IRON : BEAM), sph([x, 31.6, 15], [1, 0.5, 1.8], IRON));
     P.push(cap([12, 33, 0], [12, 33, 13], 1, BEAM), cap([7.5, 33, 10], [16.5, 33, 10], 0.9, BEAM), sph([12, 33, 9], [3, 2.4, 4], HAY), sph([12, 33, 15], 2.2, HAY));
-    P.push(slab([-4, cy + 20, 0], [9, 2.4, 0.5], CAPSTONE));
+    P.push(slab([-4, cy + 20, 0], [9, 2.4, 0.5], CAPSTONE), ...lantern(-15, cy + 22, 14));
     return P;
   },
   mill() {
     const P = [], cy = 2;
-    P.push(slab([-8, cy, 0], [24, 15, 11], TIMBER), ...late(roof([-8, cy, 22], 27, 18, 17, WOODROOF)));
+    P.push(slab([-8, cy, 0], [24, 15, 11], TIMBER), ...late(vroof([-8, cy, 22], 27, 18, 17, WOODROOF)));
     P.push(...door(-14, cy + 15, 5, 12, DPLANK, BEAM), ...win(1, cy + 15, 13, 1.8, 2.6), ...winE(16, cy, 13, 1.8, 2.6));
     // open saw shed
     for (const [x, y] of [[20, cy - 8], [38, cy - 8], [20, cy + 14], [38, cy + 14]]) P.push(cap([x, y, 0], [x, y, 15], 1.2, BEAM));
-    P.push(...late(roof([29, cy + 3, 15], 12, 14, 7, WOODROOF)));
+    P.push(...late(vroof([29, cy + 3, 15], 12, 14, 7, WOODROOF)));
     P.push(slab([29, cy + 6, 0], [7, 2.4, 3], PLANK), cap([22, cy + 6, 7.4], [36, cy + 6, 7.4], 2.4, mat('wood', 1, 6, { tex: TEX.noise(0.2, 1.2) })));
     P.push(fru([29, cy + 8.6, 8], 6.4, 6.4, 0.7, mat('steel', 1, 9, { spec: 0.5, tex: (lp) => { const r = Math.hypot(lp[0], lp[1]), a = Math.atan2(lp[1], lp[0]); return r > 5 ? (Math.sin(a * 12) > 0 ? 0.2 : -0.5) : r < 1.5 ? -0.5 : 0; } }), FRONT));
     P.push(...logPile(-22, 28, 3, 10), ...logPile(8, 30, 2, 8));
@@ -195,7 +218,7 @@ const KINGDOM = {
   stable() {
     const P = [], cy = 2;
     P.push(slab([0, cy, 0], [36, 16, 9], PLANK));
-    P.push(...late(roof([0, cy, 18], 39, 19.5, 15, WOODROOF)), ...late(cap([-39, cy, 33.2], [39, cy, 33.2], 0.9, BEAM)));
+    P.push(...late(vroof([0, cy, 18], 39, 19.5, 15, WOODROOF)), ...late(cap([-39, cy, 33.2], [39, cy, 33.2], 0.9, BEAM)));
     // stall openings with half doors
     for (const x of [-25, -8.4, 8.4, 25]) {
       P.push(box([x, cy + 16.2, 8], [6, 0.4, 8], DARK), box([x, cy + 16.6, 4], [6, 0.4, 4], mat('wood', 2, 7, { tex: (lp) => (Math.abs(Math.abs(lp[0]) - Math.abs(lp[2]) * 1.4) < 0.9 ? -0.3 : TEX.planks(3)(lp, [0, 1, 0])) })));
@@ -214,7 +237,7 @@ const KINGDOM = {
   forge() {
     const P = [], cy = 0;
     P.push(slab([-4, cy, 0], [27, 17, 11.5], DSTONE), slab([-4, cy, 23], [27.6, 17.6, 1], CAPSTONE));
-    P.push(...late(roof([-4, cy, 25], 30, 20, 15, SLATE)));
+    P.push(...late(vroof([-4, cy, 25], 30, 20, 15, SLATE)));
     // glowing furnace mouth and big chimney
     P.push(box([-12, cy + 17.3, 7.5], [8.4, 0.4, 8], CAPSTONE), fru([-12, cy + 17, 15], 8.4, 8.4, 0.7, CAPSTONE, FRONT));
     P.push(box([-12, cy + 17.8, 6.5], [6, 0.4, 6.5], FIRE), fru([-12, cy + 17.5, 13], 6, 6, 0.7, FIRE, FRONT));
@@ -236,8 +259,8 @@ const KINGDOM = {
     for (let a = 0; a < 10; a++) { const an = a * Math.PI / 5 + 0.3; P.push(box([Math.cos(an) * 13.6, 2 + Math.sin(an) * 13.6, 54], [1.9, 1.7, 2.3], CAPSTONE, rot(an * 180 / Math.PI))); }
     P.push(...door(-3, 13.6, 3.6, 11));
     P.push(box([-4, 13.6, 26], [0.9, 0.5, 3], DARK), box([4.6, 12.4, 36], [0.9, 0.5, 2.6], DARK));
-    P.push(...late(fru([0, 2, 51.6], 9.6, 9, 5, DSTONE), fru([0, 2, 56.6], 11.6, 0.3, 17, TEAMROOF), sph([0, 2, 73.6], 1.3, GOLD)));
-    P.push(...flag(0, 2, 74, 11, 8));
+    P.push(...late(fru([0, 2, 51.6], 9.6, 9, 5, DSTONE), ...hat(0, 2, 56.6, 10, 27, TEAMROOF), sph([0, 2, 83.6], 1.3, GOLD)));
+    P.push(...flag(0, 2, 84, 10, 8), ...lantern(-12, 16, 11));
     P.push(...banner(-3, 12.6, 38, 2.2, 4.6));
     return P;
   },
@@ -249,6 +272,7 @@ function hut(x, y, r, wallH, roofH, wallM = DLOGW, roofM = HIDE) {
   P.push(...late(fru([x, y, wallH - 1], r + 3.4, r * 0.34, roofH * 0.62, roofM), fru([x, y, wallH - 1 + roofH * 0.62], r * 0.34, 0.8, roofH * 0.38, roofM)));
   // poles poking out of the top
   for (let k = 0; k < 4; k++) { const a = k * 1.7 + 0.4; P.push(...late(cap([x, y, wallH + roofH - 3], [x + Math.cos(a) * 3.6, y + Math.sin(a) * 3.6, wallH + roofH + 4.6], 0.55, DBEAM))); }
+  P.push(...late(sph([x, y, wallH - 1 + roofH - 0.6], [Math.max(1.6, r * 0.13), Math.max(1.6, r * 0.13), 1.5], EMBER))); // the hearth glows through the smoke hole
   return P;
 }
 function hutDoor(x, y, r, hw, h) { return [box([x, y + r + 0.1, h / 2], [hw + 1.5, 0.6, h / 2 + 1.2], DBEAM), box([x, y + r + 0.5, h / 2 - 0.4], [hw, 0.5, h / 2], DARK)]; }
@@ -272,6 +296,7 @@ const WARBAND = {
     P.push(...wbanner(-27, cy + 44, 34), ...wbanner(27, cy + 44, 34));
     // fire pit
     P.push(fru([40, cy + 36, 0], 5, 4.4, 2, ROCK), ...late(sph([40, cy + 36, 3.4], [3, 3, 3.6], FIRE)));
+    P.push(...shard(-50, cy + 34, 30, -1), ...shard(52, cy + 30, 22, 1), ...shard(-58, cy - 4, 18, 0.4));
     return P;
   },
   farm() {
@@ -281,7 +306,7 @@ const WARBAND = {
     P.push(fru([10, 19, 0], 17, 17, 0.5, mat('dirt', 0, 4, { tex: TEX.noise(0.4, 1.2) })));
     P.push(...palisade(-10, 30, 28, 32, 7, DLOGW, 5.4), ...palisade(28, 28, 28, 6, 7, DLOGW, 5.4), ...palisade(-11, 26, -11, 12, 7, DLOGW, 5.4));
     for (const [x, y, a] of [[6, 18, 30], [17, 23, -70]]) { P.push(sph([x, y, 3.6], [3.2, 4.8, 3], mat('skin', 2, 6), rot(a)), sph(add([x, y, 3.8], scl([-Math.sin(a * Math.PI / 180), Math.cos(a * Math.PI / 180), 0], 4.6)), 2.1, mat('skin', 2, 6))); }
-    P.push(...wbanner(16, -12, 30, 5), fru([21, 2, 0], 4.4, 3.6, 7, mat('leather', 1, 6, { tex: TEX.streaks(0.2) })), sph([21, 2, 7.4], [3.8, 3.8, 1.6], HAY));
+    P.push(...wbanner(16, -12, 30, 5), fru([21, 2, 0], 4.4, 3.6, 7, mat('leather', 1, 6, { tex: TEX.streaks(0.2) })), sph([21, 2, 7.4], [3.8, 3.8, 1.6], HAY), ...shard(-24, 6, 17, -0.6));
     return P;
   },
   barracks() {
@@ -298,7 +323,7 @@ const WARBAND = {
     P.push(cap([-27, cy + 8, 0], [-27, cy + 8, 11], 0.9, DBEAM), cap([-18, cy + 12, 0], [-18, cy + 12, 11], 0.9, DBEAM), cap([-28, cy + 7.6, 10], [-17, cy + 12.4, 10], 0.8, DBEAM));
     for (const t of [0.25, 0.55, 0.85]) { const x = -27 + 9 * t, y = cy + 8.6 + 4 * t; P.push(cap([x, y + 1, 0.5], [x, y, 16], 0.55, BEAM), sph([x, y, 15.6], [2.6, 0.7, 2.1], IRON, rot(25))); }
     P.push(fru([23, cy + 12, 0], 4.6, 4, 2, ROCK), ...late(sph([23, cy + 12, 4], [3, 3, 4.2], FIRE)));
-    P.push(...wbanner(-36, cy + 26, 36, 6.4), ...wbanner(36, cy + 26, 36, 6.4));
+    P.push(...wbanner(-36, cy + 26, 36, 6.4), ...wbanner(36, cy + 26, 36, 6.4), ...shard(-20, cy + 34, 20, -0.8), ...shard(22, cy + 35, 24, 0.7));
     return P;
   },
   mill() {
@@ -313,15 +338,17 @@ const WARBAND = {
     P.push(cap([6, cy + 22, 13.6], [41, cy + 22, 13.6], 3.1, mat('wood', 1, 6, { tex: TEX.noise(0.2, 1.2) })), sph([42.6, cy + 22, 13.6], [1, 2.8, 2.8], mat('wood', 6, 9)));
     P.push(box([24, cy + 22.4, 15], [0.5, 1.6, 9], mat('steel', 0, 8, { spec: 0.4, tex: (lp) => ((Math.floor(lp[2] * 1.2 + 20) & 1) && lp[1] > 0.6 ? -0.6 : 0) }), rot(0, 0, 24)), cap([19.6, cy + 22.4, 23.6], [22.6, cy + 22.4, 24.6], 0.9, DBEAM));
     P.push(...logPile(-24, cy + 29, 3, 10), ...logPile(8, cy + 36, 2, 7));
-    P.push(fru([34, cy - 12, 0], 4.2, 3.8, 4.6, mat('wood', 2, 8)), ...wbanner(-34, cy - 14, 40, 6));
+    P.push(fru([34, cy - 12, 0], 4.2, 3.8, 4.6, mat('wood', 2, 8)), ...wbanner(-34, cy - 14, 40, 6), ...shard(36, cy + 4, 22, 0.8));
     return P;
   },
   stable() {
     const P = [], cy = 0;
     // rocky den mound with a cave mouth
     const rk = mat('rock', 1, 8, { tex: TEX.noise(0.12, 0.7) });
-    P.push(boulder([-6, cy - 6, 0], [32, 22, 30], 11, rk), boulder([-26, cy + 2, 0], [16, 15, 19], 12, rk), boulder([20, cy, 0], [18, 16, 22], 13, rk), boulder([4, cy - 14, 0], [18, 13, 40], 14, rk), boulder([-16, cy - 10, 0], [12, 12, 35], 15, rk));
-    P.push(boulder([-34, cy + 16, 0], 6, 16, rk), boulder([38, cy + 12, 0], 7, 17, rk));
+    P.push(sph([-6, cy - 6, 0], [36, 24, 20], rk), sph([-6, cy + 4, 0], [20, 15, 22], rk));
+    for (const [x, y, r, h, yaw, tilt] of [[6, cy - 14, 17, 48, 30, 10], [-18, cy - 12, 14, 40, 210, 12], [24, cy - 2, 12, 28, 80, 14], [-32, cy + 2, 11, 24, 250, 14], [-6, cy - 2, 13, 30, 160, 4]])
+      P.push(fru([x, y, 0], r, r * 0.1, h, rk, rot(yaw, tilt, 0)));
+    P.push(boulder([-34, cy + 16, 0], 6, 16, rk), boulder([38, cy + 12, 0], 7, 17, rk), ...shard(40, cy - 8, 24, 0.8), ...shard(-44, cy - 6, 18, -0.7));
     P.push(sph([-6, cy + 13.6, 0], [10, 6, 13], mat('gray', 0, 1, { glow: 0.02 })));
     // rib arches over the entrance
     for (const s of [-1, 1]) { P.push(...tusk(-6 + s * 13, cy + 18, 0, 22, -s, 2.2)); }
@@ -349,7 +376,7 @@ const WARBAND = {
     // anvil stone, tongs, slag heap
     P.push(fru([27, 26, 0], 5, 4.4, 5, ROCK), slab([27, 26, 5], [4.6, 2.4, 1.3], IRON));
     P.push(sph([-28, 30, 0], [7.6, 5.4, 4.6], mat('gray', 1, 5, { tex: TEX.noise(0.5, 1.6) })), sph([-26, 31, 2.6], [2.4, 2, 2], FIRE));
-    P.push(...wbanner(30, cy - 14, 42, 6));
+    P.push(...wbanner(30, cy - 14, 42, 6), ...shard(34, cy + 10, 26, 0.9), ...shard(-34, cy + 12, 18, -0.7));
     return P;
   },
   tower() {
@@ -368,7 +395,7 @@ const WARBAND = {
     P.push(...late(skull(0, 13.4, 33, 1)));
     P.push(...late(cap([0, 3, 66], [0.6, 3, 80], 0.6, DBEAM), box([4.2, 3, 76], [3.6, 0.4, 2.6], TEAM)));
     // ladder
-    P.push(cap([-4, 16, 0], [-3, 11, 36], 0.6, BEAM), cap([1, 16, 0], [2, 11, 36], 0.6, BEAM));
+    P.push(cap([-4, 16, 0], [-3, 11, 36], 0.6, BEAM), cap([1, 16, 0], [2, 11, 36], 0.6, BEAM), ...shard(17, 16, 20, 0.7), ...shard(-18, 10, 14, -0.8));
     for (let z = 5; z < 36; z += 5.5) P.push(cap([-4 + z / 36, 16 - z * 0.14, z], [1 + z / 36, 16 - z * 0.14, z], 0.5, BEAM));
     return P;
   },
@@ -381,8 +408,15 @@ function mine() {
     if (h > 0.965) return { ramp: 'gold', lo: 3, hi: 7, d: 0.35 };
     return (h - 0.5) * 0.16 + (hash2(Math.floor(wp[2] / 5 + wp[0] / 14), 5) - 0.5) * 0.1;
   } });
-  P.push(boulder([0, -6, 0], [38, 22, 26], 1, rk), boulder([-25, 2, 0], [18, 17, 18], 2, rk), boulder([25, 0, 0], [20, 18, 20], 3, rk), boulder([8, -14, 0], [19, 13, 33], 4, rk), boulder([-13, -12, 0], [15, 12, 29], 5, rk));
-  P.push(boulder([-36, 14, 0], 7, 6, rk), boulder([38, 16, 0], 6, 7, rk), boulder([0, 4, 0], [16, 16, 23], 8, rk));
+  // a crag of leaning spires on a low mound, rather than one faceted block
+  P.push(sph([0, -4, 0], [41, 24, 15], rk), sph([-4, 6, 0], [24, 17, 21], rk));
+  for (const [x, y, r, h, yaw, tilt] of [[8, -13, 19, 60, 20, 7], [-15, -11, 16, 46, 200, 9], [27, -5, 14, 36, 80, 12], [-31, -1, 12, 28, 250, 13], [3, -2, 15, 33, 150, 5], [-22, 6, 9, 20, 300, 10], [36, 6, 8, 16, 40, 14]])
+    P.push(fru([x, y, 0], r, r * 0.12, h, rk, rot(yaw, tilt, 0)));
+  P.push(boulder([-37, 15, 0], 6, 6, rk), boulder([39, 17, 0], 5, 7, rk), boulder([-27, 14, 0], 4, 9, rk));
+  // raw gold breaking the surface
+  const vein = mat('gold', 2, 7, { spec: 0.8, shin: 12 });
+  for (const [x, y, z, h, yaw, tilt] of [[18, 3, 14, 9, 30, 50], [-19, 2, 16, 8, 200, 55], [9, -8, 40, 7, 90, 60], [-10, -6, 30, 6, 300, 50], [30, 2, 12, 6, 0, 65]])
+    P.push(fru([x, y, z], 2.2, 0, h, vein, rot(yaw, tilt, 0)), fru([x + 1.5, y + 1, z - 1], 1.5, 0, h * 0.6, vein, rot(yaw + 60, tilt + 10, 0)));
   // timbered entrance
   P.push(sph([0, 18.5, 0], [11.6, 6, 17], mat('gray', 0, 1, { glow: 0.02 })));
   P.push(cap([-11.6, 24, 0], [-10.6, 24, 17], 2, BEAM), cap([11.6, 24, 0], [10.6, 24, 17], 2, BEAM), cap([-14, 24, 18], [14, 24, 18], 2.3, BEAM));

@@ -144,6 +144,7 @@ function hit(p, ox, oy, oz, dx, dy, dz) {
 
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 export const LIGHT = norm([-0.62, 0.34, 0.70]);
+const RIM = norm([0.8, -0.25, 0.45]);
 const SUN_GROUND = norm([-0.55, 0.26, 1.25]); // steeper sun for ground shadows keeps them short
 
 // o: {w,h,ox,oy,scale,yaw(deg),ky,kz,shadow,outline,dither,ambient}
@@ -154,7 +155,7 @@ export function render(prims, o) {
   const yaw = deg(o.yaw || 0), cy = Math.cos(yaw), sy = Math.sin(yaw);
   // view -> model: rotate by -yaw about z
   const toM = (v) => [v[0] * cy + v[1] * sy, -v[0] * sy + v[1] * cy, v[2]];
-  const Dv = norm([0, kz, ky]), D = toM(Dv), L = toM(LIGHT), LG = toM(SUN_GROUND), Hh = norm(add(LIGHT, Dv)), Hm = toM(Hh);
+  const Dv = norm([0, kz, ky]), D = toM(Dv), RIMm = toM(RIM), L = toM(LIGHT), LG = toM(SUN_GROUND), Hh = norm(add(LIGHT, Dv)), Hm = toM(Hh);
   const dx = -D[0], dy = -D[1], dz = -D[2];
   const n = prims.length;
   // screen-space bounds per prim for quick rejection
@@ -204,6 +205,8 @@ export function render(prims, o) {
     const wx = ox + dx * best, wy = oy + dy * best, wz = oz + dz * best;
     let ndl = nx * L[0] + ny * L[1] + nz * L[2]; if (ndl < 0) ndl = 0;
     let I = amb + 0.64 * ndl + 0.10 * nz;
+    // a second, weaker light from behind on the right picks out the shaded edge of every form
+    const rim = nx * RIMm[0] + ny * RIMm[1] + nz * RIMm[2]; if (rim > 0.35 && ndl < 0.3) I += (rim - 0.35) * 0.42;
     if (o.selfShadow !== false && ndl > 0.05 && !m.glow && inShadow(wx + nx * 0.3, wy + ny * 0.3, wz + nz * 0.3, bi, L)) I = amb + 0.10 * nz + 0.10 * ndl;
     if (m.spec) { const nh = nx * Hm[0] + ny * Hm[1] + nz * Hm[2]; if (nh > 0) I += m.spec * Math.pow(nh, m.shin || 10); }
     if (o.ground !== false && wz < 5) I -= (5 - wz) * 0.022; // contact darkening

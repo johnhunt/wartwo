@@ -92,7 +92,7 @@ export function paintGround(tileAt, tx0, ty0, tw, th) {
         if (!land(x, y) || !land(x, y - 2)) continue;
         if (q < 0.5) { im.set(x, y, G[2]); im.set(x, y - 1, G[7]); im.set(x, y - 2, G[8]); im.set(x + 1, y - 1, G[8]); im.set(x - 1, y, G[7]); im.set(x + 1, y, G[2]); }
         else if (q < 0.8) { im.set(x, y, G[8]); im.set(x + 1, y - 1, G[9]); im.set(x + 1, y + 1, G[2]); }
-        else if (q < 0.86) { const fc = q < 0.82 ? c('gold', 5) : q < 0.84 ? c('white', 0) : c('roofr', 5); im.set(x, y, fc); im.set(x + 1, y, fc); im.set(x, y + 1, G[2]); im.set(x + 1, y + 1, G[3]); im.set(x, y - 1, fc); im.set(x - 1, y, fc); im.set(x, y, c('gold', 3)); }
+        else if (q < (hsh(X >> 2, Y >> 2) > 0.7 ? 0.97 : 0.86)) { const fc = q < 0.82 ? c('gold', 5) : q < 0.84 ? c('white', 0) : q < 0.9 ? c('roofr', 5) : c('obsid', 3); im.set(x, y, fc); im.set(x + 1, y, fc); im.set(x, y + 1, G[2]); im.set(x + 1, y + 1, G[3]); im.set(x, y - 1, fc); im.set(x - 1, y, fc); im.set(x, y, c('gold', 3)); }
         else if (q > 0.965) { im.set(x, y, RK[6]); im.set(x + 1, y, RK[5]); im.set(x, y + 1, RK[2]); im.set(x + 1, y + 1, RK[2]); im.set(x, y - 1, RK[7]); }
       }
     } else if (t === T_DIRT) {
@@ -169,7 +169,24 @@ function pine(im, cx, base, hw, h, seed) {
   // tip
   const ty = Math.round(base - h + 4); im.set(cx, ty - 2, P[7]); im.set(cx, ty - 1, P[6]); im.set(cx - 1, ty, P[7]); im.set(cx, ty, P[5]); im.set(cx + 1, ty, P[3]);
 }
-// A forest tile: a clump of 3 pines, 48 wide x 64 tall; the tile sits at (8, 30) inside it.
+// A broadleaf tree in autumn colour: a trunk under a few lit, overlapping crowns.
+function leafy(im, cx, base, r, seed) {
+  const A = R.autumn, rr = rng(seed);
+  for (let y = base - 9; y <= base; y++) for (let x = -1; x <= 1; x++) im.set(cx + x, y, c('wood', x < 0 ? 4 : x === 0 ? 3 : 1));
+  im.set(cx - 2, base, c('wood', 2)); im.set(cx + 2, base, c('wood', 1));
+  const blobs = [[0, -r * 1.2, r * 1.05], [-r * 0.55, -r * 0.8, r * 0.8], [r * 0.52, -r * 0.74, r * 0.78], [-r * 0.15, -r * 1.7, r * 0.72], [r * 0.3, -r * 1.5, r * 0.62]];
+  for (const [bx, by, br] of blobs) {
+    const ox = cx + bx + rr.int(3) - 1, oy = base - 7 + by;
+    for (let y = -br; y <= br; y++) for (let x = -br; x <= br; x++) {
+      const d = (x * x + y * y) / (br * br); if (d > 1) continue;
+      let v = 4.2 - (x * 0.9 + y * 1.3) / br * 2.4 - d * 0.6; // lit from the upper left
+      const hh = (Math.imul(Math.round(ox + x), 73) + Math.imul(Math.round(oy + y), 151) + seed) >>> 0;
+      if (hh % 7 === 0) v -= 1.4; else if (hh % 5 === 0) v += 1.1;
+      im.set(ox + x, oy + y, A[Math.max(1, Math.min(7, Math.round(v)))]);
+    }
+  }
+}
+// A forest tile: a clump of 3 trees (pines, with the odd autumn broadleaf), 48 wide x 64 tall; the tile sits at (8, 30) inside it.
 export const TREE = { w: 48, h: 64, ox: 8, oy: 32 };
 export function treeClump(v) {
   const im = new Img(TREE.w, TREE.h), r = rng(900 + v * 17);
@@ -179,8 +196,9 @@ export function treeClump(v) {
   const trees = lay.map(([x, y], i) => ({ x: x + r.int(3) - 1, y: y - (i === 2 ? r.int(2) : 0), hw: 10 + r.int(3) + (i === 2 ? 1 : 0), h: 34 + r.int(9) + (v > 3 ? 4 : 0) }));
   trees.sort((a, b) => a.y - b.y);
   for (const t of trees) {
-    const one = new Img(TREE.w, TREE.h); pine(one, t.x, t.y, t.hw, t.h, 31 + v * 13 + t.x);
-    one.outline(R.pine[0]);
+    const one = new Img(TREE.w, TREE.h), broad = (v === 4 && t !== trees[0]) || (v === 5 && t === trees[2]);
+    if (broad) leafy(one, t.x, t.y, 9 + (t.hw - 10), 31 + v * 13 + t.x); else pine(one, t.x, t.y, t.hw, t.h, 31 + v * 13 + t.x);
+    one.outline(broad ? R.autumn[0] : R.pine[0]);
     im.blit(one, 0, 0);
   }
   return im;
@@ -196,4 +214,4 @@ export function rockClump(v) {
   return render(P, { w: ROCKV.w, h: ROCKV.h, ox: ROCKV.ox + 16, oy: ROCKV.oy + 17, ky: 0.74, kz: 0.8, edge: 3, edgeDark: 2 });
 }
 
-export const MINI_COL = { [T_GRASS]: [63, 122, 34], [T_DIRT]: [122, 88, 48], [T_STUMP]: [74, 118, 40], [T_FOREST]: [18, 62, 34], [T_WATER]: [26, 76, 150], [T_ROCK]: [118, 110, 104] };
+export const MINI_COL = { [T_GRASS]: [58, 128, 44], [T_DIRT]: [140, 86, 48], [T_STUMP]: [74, 124, 44], [T_FOREST]: [16, 70, 56], [T_WATER]: [18, 110, 150], [T_ROCK]: [108, 104, 132] };
