@@ -221,11 +221,13 @@ function drainEvents() {
       case 'attacked':
         if (ev.p === me && performance.now() - alertT > 8000 && !onScreen(ev.x, ev.y)) { alertT = performance.now(); addMsg('We are under attack! (Space to look)'); ui.ping = { x: ev.x, y: ev.y, t: 90 }; ui.lastAlert = { x: ev.x, y: ev.y }; }
         break;
-      case 'defeat': if (ev.p === me) { ui.banner = 'Defeat'; ui.subBanner = 'Your forces have been destroyed. Press F10 to leave.'; R.revealAll = true; } else addMsg(game.players[ev.p].name + ' has been defeated!'); break;
+      case 'defeat': if (ev.p === me) { ui.banner = 'Defeat'; ui.subBanner = 'Your forces have been destroyed. ' + (touchMode ? 'Tap Menu to leave.' : 'Press F10 to leave.'); R.revealAll = true; } else addMsg(game.players[ev.p].name + ' has been defeated!'); break;
       case 'over': {
         const won = me >= 0 && game.players[me].team === ev.team, draw = ev.draw && me >= 0 && !game.players[me].defeated;
         ui.banner = won ? 'Victory!' : draw ? 'Stalemate' : 'Defeat';
-        ui.subBanner = won ? 'The land is yours. Press F10 to leave.' : draw ? 'No army can be raised by either side. Press F10 to leave.' : 'Press F10 to leave.';
+        const P = me >= 0 ? game.players[me] : null, mins = Math.floor(game.tick / 1200), leave = touchMode ? 'Tap Menu to leave.' : 'Press F10 to leave.';
+        ui.subBanner = (won ? 'The land is yours. ' : draw ? 'No army can be raised by either side. ' : '') + leave;
+        if (P) ui.stats = `${mins} min  ·  destroyed ${P.kills}  ·  lost ${P.lost}  ·  gold ${P.goldMined}  ·  lumber ${P.woodCut}`;
         R.revealAll = true; break;
       }
     }

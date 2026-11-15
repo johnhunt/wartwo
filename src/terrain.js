@@ -2,7 +2,7 @@
 // dirt, sand and water blend along ragged, organic borders instead of tile edges.
 import { c, R, SHADOW } from './palette.js';
 import { Img } from './img.js';
-import { render, sph, fru, cap, mat, hash2, TEX } from './r3d.js';
+import { render, sph, fru, cap, mat, rot, hash2, TEX } from './r3d.js';
 import { boulder } from './buildings.js';
 import { rng, T_GRASS, T_FOREST, T_WATER, T_ROCK, T_DIRT, T_STUMP } from './map.js';
 
@@ -209,7 +209,12 @@ export const ROCKV = { w: 56, h: 64, ox: 12, oy: 30 };
 export function rockClump(v) {
   const m = mat('rock', 1, 8, { tex: TEX.noise(0.14, 0.8) }), P = [];
   const lay = [[[-3, -1, 13, 26], [8, 5, 9, 15], [-9, 8, 6, 8]], [[4, -2, 12, 30], [-8, 3, 10, 17], [7, 9, 6, 7]], [[0, 0, 14, 21], [-9, -5, 8, 27], [9, 7, 7, 10]], [[-5, 2, 11, 19], [7, -2, 11, 24], [0, 10, 6, 6]]][v % 4];
-  let i = 0; for (const [x, y, r, h] of lay) P.push(boulder([x, y, 0], [r, r * 0.85, h], v * 10 + i++, m));
+  let i = 0;
+  for (const [x, y, r, h] of lay) {
+    if (i === 2) P.push(boulder([x, y, 0], [r, r * 0.85, h], v * 10 + i, m)); // one squat block at the foot
+    else P.push(sph([x, y, 0], [r * 0.95, r * 0.75, h * 0.3], m), fru([x, y, 0], r * 0.9, r * 0.1, h * 1.25, m, rot(v * 70 + i * 130, 9 + i * 4, 0)), fru([x + r * 0.5, y + 2, 0], r * 0.5, 0, h * 0.7, m, rot(v * 40 + i * 90 + 50, 16, 0)));
+    i++;
+  }
   P.push(boulder([13 - v * 2, 12, 0], 3.2, v + 40, m), boulder([-13 + v, 12, 0], 2.6, v + 50, m));
   return render(P, { w: ROCKV.w, h: ROCKV.h, ox: ROCKV.ox + 16, oy: ROCKV.oy + 17, ky: 0.74, kz: 0.8, edge: 3, edgeDark: 2 });
 }

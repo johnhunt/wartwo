@@ -51,11 +51,11 @@ Everything is synthesized live in the browser. There are no audio files.
   collapsing buildings, burning fires, birds and crows. Each building has its own sound when you select it.
 - **Speech**: like the voice recordings in classic RTS games, every line is a pre-recorded clip in `assets/voice/` (246 lines,
   about 3 MB). They were rendered offline with the [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) neural text-to-speech model
-  (Apache-2.0), with a separate voice for each unit type. Kingdom units use British voices. Warband orcs are pitched and formant-shifted
+  (Apache-2.0), with a separate voice for each unit type. Kingdom units use British voices. Warband voices are pitched and formant-shifted
   down, layered with a sub-octave growl and given some grit, and the shaman narrator has a cave echo. Units speak when selected, given
   orders, attacking, finishing training or finishing work, and get annoyed if you keep clicking them. A herald or shaman announces
   attacks, missing resources and the end of the battle. Death screams are real recordings from free sound packs (see
-  [CREDITS.md](CREDITS.md)). Warband screams get the same orc treatment as the voices. To change or add lines, edit `src/audio/voice-lines.js` and run
+  [CREDITS.md](CREDITS.md)). Warband screams get the same treatment as the voices. To change or add lines, edit `src/audio/voice-lines.js` and run
   `python tools/render-voices.py` (needs `pip install kokoro soundfile numpy` on Python 3.10–3.12, and ffmpeg built with rubberband).
 
 ## Multiplayer

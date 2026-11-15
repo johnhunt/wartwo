@@ -249,7 +249,8 @@ export class Game {
         const b = Object.hasOwn(BUILDINGS, cmd.btype) ? BUILDINGS[cmd.btype] : null; if (!b || b.neutral || cmd.x === undefined) break;
         if (b.req && !P.has[b.req]) { this.emit({ t: 'msg', p: cmd.p, text: 'Requires ' + b.names[P.faction].toLowerCase(), code: 'requires' }); break; }
         if (P.gold < b.gold || P.wood < b.wood) { this.emit({ t: 'msg', p: cmd.p, text: P.gold < b.gold ? 'Not enough gold' : 'Not enough lumber', code: P.gold < b.gold ? 'gold' : 'wood' }); break; }
-        this.setOrder(u, { type: 'build', btype: cmd.btype, x: cmd.x, y: cmd.y, tries: 0 });
+        const g0 = u.order && u.order.type === 'gather' ? u.order : null, prev = g0 ? { mine: g0.kind === 'gold' ? g0.mine : 0, tx: g0.kind === 'wood' ? g0.tx : undefined, ty: g0.ty } : (u.order && u.order.prev) || null;
+        this.setOrder(u, { type: 'build', btype: cmd.btype, x: cmd.x, y: cmd.y, tries: 0, prev });
         break;
       }
       case 'train': {
@@ -385,7 +386,8 @@ export class Game {
       if (b.progress >= d.time) {
         b.built = true; b.hp = Math.max(1, b.maxHp - b.dmgTaken);
         const w = this.get(b.builder); if (w) this.popOut(w, b);
-        if (w) w.order = null;
+        // a worker pulled off the mine or the trees to build goes back to that job afterwards
+        if (w) { const pv = w.order && w.order.prev; w.order = null; if (pv) this.orderGather(w, pv.mine, pv.tx, pv.ty); }
         this.emit({ t: 'built', p: b.owner, id: b.id, type: b.type, x: b.x, y: b.y, builder: w ? w.id : 0 });
         this.updatePlayers();
       }
@@ -638,8 +640,10 @@ export class Game {
       // too close: siege just waits (or attack-move continues)
       if (u.order.type === 'amove') u.order.sub = 0; else if (u.order.auto) u.order = null;
     } else {
+      if (u.retryAt > this.tick) return; // no room at the target just now: wait a moment before looking again
       const r = this.moveToward(u, t.x, t.y, t.size, d.range, true);
-      if (r === 'stuck') {
+      if (r === 'stuck' && u.order.type === 'attack' && !u.order.auto) u.retryAt = this.tick + 30; // ordered to attack this: keep the order and queue for a space
+      else if (r === 'stuck') {
         // no way in (surrounded by friends, walled off): leave this one alone for a while and find something else
         if (u.order.type === 'amove' || u.order.auto) { u.skipId = t.id; u.skipUntil = this.tick + 100; }
         if (u.order.type === 'amove') u.order.sub = 0; else u.order = null;
@@ -751,7 +755,7 @@ export class Game {
     const e = this.spawn(o.btype, u.owner, o.x, o.y);
     e.built = false; e.progress = 0; e.hp = (e.maxHp / 10) | 0; e.builder = u.id;
     this.hide(u, e);
-    u.order = { type: 'constructing', target: e.id };
+    u.order = { type: 'constructing', target: e.id, prev: o.prev };
     this.emit({ t: 'sfx', s: 'build', x: o.x, y: o.y });
   }
 

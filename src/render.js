@@ -183,7 +183,7 @@ export class Renderer {
     for (const e of g.ents) {
       if (!e.unit || e.dead) continue;
       if (e.hidden && !e._in) { const b = g.get(e.inside); e._in = true; e._inT = now; e._from = e._px !== undefined ? [e._px, e._py] : null; e._door = b ? inside(e, b) : null; e._bld = b ? { x: b.x, y: b.y, size: b.size } : null; e._fade = e._from && e._door ? fadeMs(e, e._from, e._door) : 0; }
-      else if (!e.hidden && e._in) { e._in = false; e._outT = now; e._door = e._bld ? inside(e, e._bld) : null; e._fade = e._door ? fadeMs(e, e._door, [e.x * TILE, e.y * TILE]) : 0; }
+      else if (!e.hidden && e._in) { e._in = false; e._outT = now; e._fade = 260; }
       if (e.hidden && e._from && e._door && now - e._inT < e._fade && (this.ally(e.owner) || this.visible[e.y * g.w + e.x])) {
         const p = (now - e._inT) / e._fade, x = e._from[0] + (e._door[0] - e._from[0]) * p, y = e._from[1] + (e._door[1] - e._from[1]) * p;
         const dx = e._door[0] - e._from[0], dy = e._door[1] - e._from[1], P = g.players[e.owner];
@@ -193,11 +193,9 @@ export class Renderer {
         ctx.globalAlpha = 1;
       }
     }
-    const fadeIn = (e) => (e._outT && e._door && now - e._outT < e._fade ? (now - e._outT) / e._fade : 1);
-    const posOf = (e) => {
-      const q = posOf0(e), p = e.unit ? fadeIn(e) : 1;
-      return p < 1 ? [q[0] + (e._door[0] - e.x * TILE) * (1 - p), q[1] + (e._door[1] - e.y * TILE) * (1 - p)] : q;
-    };
+    const fadeIn = (e) => (e._outT && now - e._outT < e._fade ? (now - e._outT) / e._fade : 1);
+    // on the way out a unit only fades in: it is already walking, and sliding it as well made it move at double speed
+    const posOf = posOf0;
     // trees and rocks join the depth sort so units can walk behind them
     for (let y = Math.max(0, ty0 - 1); y <= Math.min(g.h - 1, ty1 + 2); y++) for (let x = Math.max(0, tx0 - 1); x <= Math.min(g.w - 1, tx1 + 1); x++) {
       const t = g.terrain[y * g.w + x];
@@ -247,7 +245,8 @@ export class Renderer {
       ctx.drawImage(sp, -sp.width / 2, -sp.height / 2); ctx.restore();
     }
     for (const f of this.effects) if (f.k === 'boom' && f.t >= 0) ctx.drawImage(S.boomSprite(Math.min(4, Math.floor(f.t / 3))), f.x * TILE - 8, f.y * TILE - 8);
-    // health bars for selected
+    // health bars for selected units, and briefly for anything of yours that has just been hit
+    for (const e of list) if (!e.prop && e.unit && !sel.has(e.id) && e.owner === this.me && e.hp < e.maxHp && e.lastHit && g.tick - e.lastHit < 60) this.hpBar(e, e._px, e._py);
     for (const e of list) if (!e.prop && sel.has(e.id) && e.type !== 'mine') this.hpBar(e, e._px, e._py);
     // rally point
     if (ui.selection.length === 1) { const b = g.get(ui.selection[0]); if (b && !b.unit && b.rally && b.owner === this.me) this.rallyFlag(b.rally.x * TILE, b.rally.y * TILE); }
@@ -473,8 +472,9 @@ export class Renderer {
     // floating messages in viewport
     ui.msgs.filter(m => now - m.t < 5000).slice(-3).forEach((m, i, arr) => this.text(m.text, VIEW.x + 8, VIEW.y + VIEW.h - 18 - (arr.length - 1 - i) * 14, '#fff', 10));
     if (ui.banner) {
-      const bx = VIEW.x + 40, by = VIEW.y + 170, bw = VIEW.w - 80;
-      ctx.drawImage(this.panel, 0, 0, Math.min(176, bw), 60, bx, by, bw, 60); ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(bx, by, bw, 60); S.frame(ctx, bx, by, bw, 60, 'gold');
+      const bx = VIEW.x + 40, by = VIEW.y + 170, bw = VIEW.w - 80, bh = ui.stats ? 78 : 60;
+      ctx.drawImage(this.panel, 0, 0, Math.min(176, bw), bh, bx, by, bw, bh); ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(bx, by, bw, bh); S.frame(ctx, bx, by, bw, bh, 'gold');
+      if (ui.stats) this.text(ui.stats, VIEW.x + VIEW.w / 2, VIEW.y + 228, '#f0d878', 9, 'center', false);
       this.text(ui.banner, VIEW.x + VIEW.w / 2, VIEW.y + 182, '#f0d878', 20, 'center', true, true);
       if (ui.subBanner) this.text(ui.subBanner, VIEW.x + VIEW.w / 2, VIEW.y + 210, '#e0e0e0', 10, 'center', false);
     }
