@@ -8,7 +8,7 @@ import * as music from './audio/music.js';
 import * as speech from './audio/speech.js';
 import * as GA from './audio/game-audio.js';
 import { settings, setSetting, whenUnlocked, holdAudio } from './audio/core.js';
-import { cursorSprite, prewarm, warmStep, stonePanel } from './sprites.js';
+import { cursorSprite, prewarm, warmStep, stonePanel, loadBaked } from './sprites.js';
 
 const $ = (id) => document.getElementById(id);
 const cv = $('screen'), overlay = $('overlay');
@@ -564,4 +564,5 @@ function drawTitleBackdrop(now) {
     R2.draw(0, { selection: [], msgs: [], mouse: {}, buttons: [] });
   }
 }
-requestAnimationFrame(loop);
+// fetch the pre-rendered sprite pack before the first frame (it is small); without it the art is rendered live
+Promise.race([loadBaked(), new Promise(r => setTimeout(r, 6000))]).finally(() => requestAnimationFrame(loop));

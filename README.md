@@ -13,6 +13,13 @@ It plays in a mobile browser held sideways: the picture scales to fit and the ma
 Tap a unit to select it, tap where it should go (or what to attack, harvest or repair), drag to slide the map,
 hold then drag to box-select, double tap a unit to select all of its kind. Tap the unit panel to deselect.
 
+## Art pipeline
+
+All art is generated in code. Because ray-tracing every frame in the browser takes a while, the finished unit and
+building sprites ship pre-rendered in `assets/sprites.bin.gz`. If you change the models or palette, run
+`node tools/bake-sprites.mjs` to rebuild the pack; until you do, the game notices the pack is out of date and
+simply renders the art live.
+
 ## Run it
 
 It's a static site, so any web server will do:

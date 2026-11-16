@@ -219,7 +219,9 @@ function findSpot(g, p, type, hall) {
       const side = (k / (r * 2)) | 0, off = k % (r * 2);
       let x, y;
       if (side === 0) { x = cx - r + off; y = cy - r; } else if (side === 1) { x = cx + r; y = cy - r + off; } else if (side === 2) { x = cx + r - off; y = cy + r; } else { x = cx - r; y = cy + r - off; }
-      if (type === 'tower') { /* towers anywhere */ }
+      // mirror the search for bases on the right / bottom of the map, so every base grows the same way relative to the map centre
+      if (hall.x > g.w / 2) x = 2 * cx - x - s;
+      if (hall.y > g.h / 2) y = 2 * cy - y - s;
       if (!g.inMap(x - 1, y - 1) || !g.inMap(x + s, y + s)) continue;
       // keep a ring of free tiles around for paths
       let ok = true;

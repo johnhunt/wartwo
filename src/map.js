@@ -68,8 +68,11 @@ export function generateMap(seed, players, size) {
     clearCircle(s.x + 2, s.y + 2, 8);
     // mine placed toward the map edge-ish, offset from hall
     const dx = s.x < center.x ? -1 : 1, dy = s.y < center.y ? -1 : 1;
-    let mx = s.x + 2 + dx * 6 - 1, my = s.y + 2 - 1;
-    if (r.int(2)) { mx = s.x + 2 - 1; my = s.y + 2 + dy * 6 - 1; }
+    // the same two-tile walk between hall (4 wide) and mine (3 wide) on whichever side the mine lies:
+    // it used to be a tile longer for bases on the right or bottom, a real handicap in income
+    const off = (d) => (d < 0 ? -5 : 6);
+    let mx = s.x + off(dx), my = s.y + 2 - 1;
+    if (r.int(2)) { mx = s.x + 2 - 1; my = s.y + off(dy); }
     mx = Math.max(3, Math.min(W - 6, mx)); my = Math.max(3, Math.min(H - 6, my));
     mines.push({ x: mx, y: my });
     // forest patch on the other side

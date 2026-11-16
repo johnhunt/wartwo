@@ -15,12 +15,57 @@ const OUT = c('outline', 0);
 const cache = new Map();
 function memo(key, fn) { let v = cache.get(key); if (v === undefined) { v = fn(); cache.set(key, v); } return v; }
 
+// ------------------------------------------------------------------ pre-baked sprites
+// Ray-tracing every unit frame and building takes minutes of CPU on a phone. `tools/bake-sprites.mjs`
+// renders them all once and stores the palette-indexed images in assets/sprites.bin.gz. The pack is
+// only trusted if its version matches a hash of the art source files as they are served, so editing
+// a model can never show stale art: the game just falls back to rendering live until it is re-baked.
+const ART_FILES = ['palette.js', 'r3d.js', 'img.js', 'units.js', 'buildings.js', 'sprites.js'];
+const baked = new Map();
+let rendered = null; // set while baking: collects every image that gets rendered
+function traced(key, fn) { const b = baked.get(key); if (b) return b; const im = fn(); if (rendered) rendered.set(key, im); return im; }
+export async function artVersion() {
+  let h1 = 0x811c9dc5, h2 = 0x1b873593;
+  for (const f of ART_FILES) {
+    const t = await (await fetch(new URL('./' + f, import.meta.url), { cache: 'no-cache' })).text();
+    for (let i = 0; i < t.length; i++) { const ch = t.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 16777619); h2 = Math.imul(h2 + ch, 0x85ebca6b) ^ (h2 >>> 13); }
+  }
+  return (h1 >>> 0).toString(16) + (h2 >>> 0).toString(16);
+}
+// Loads the pack if there is a current one. Resolves to the number of images loaded (0 = render live).
+export async function loadBaked() {
+  try {
+    if (typeof DecompressionStream === 'undefined') return 0;
+    const [ver, res] = await Promise.all([artVersion(), fetch(new URL('../assets/sprites.bin.gz', import.meta.url))]);
+    if (!res.ok) return 0;
+    let buf;
+    const raw = new Uint8Array(await res.arrayBuffer());
+    if (raw[0] === 0x1f && raw[1] === 0x8b) buf = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+    else buf = raw; // the server already unpacked it
+    const n = new DataView(buf.buffer, buf.byteOffset).getUint32(0, true), head = JSON.parse(new TextDecoder().decode(buf.subarray(4, 4 + n)));
+    if (head.version !== ver) { console.info('sprite pack is out of date; rendering live (run tools/bake-sprites.mjs)'); return 0; }
+    let off = 4 + n;
+    for (const [k, w, h] of head.items) { const im = new Img(w, h); im.d.set(buf.subarray(off, off + w * h)); off += w * h; baked.set(k, im); }
+    return baked.size;
+  } catch (e) { console.info('no sprite pack:', e.message); return 0; }
+}
+// Used by the bake tool: render everything prewarm covers and hand back the pack as bytes.
+export async function bakeAll() {
+  rendered = new Map(); baked.clear();
+  prewarm([0, 1]); while (warmStep(1e9)) { /* run to completion */ }
+  const items = [...rendered].map(([k, im]) => [k, im.w, im.h]), head = new TextEncoder().encode(JSON.stringify({ version: await artVersion(), items }));
+  let size = 4 + head.length; for (const [, im] of rendered) size += im.d.length;
+  const out = new Uint8Array(size); new DataView(out.buffer).setUint32(0, head.length, true); out.set(head, 4);
+  let off = 4 + head.length; for (const [, im] of rendered) { out.set(im.d, off); off += im.d.length; }
+  rendered = null; return out;
+}
+
 // ------------------------------------------------------------------ units
 // dir: 0 = facing the viewer (south), then clockwise in 45 degree steps (1 = SW, 2 = W ... 7 = SE)
 export const UNIT_OFF = { x: UNIT_VIEW.ox - 16, y: UNIT_VIEW.oy - 26 }; // draw at (tileX - x, tileY - y)
 export function unitSprite(type, faction, team, frame, carry, chopping, dir = 0) {
   const k = `u${type}${faction}${frame}${carry || ''}${chopping ? 'c' : ''}${dir}`;
-  return memo(k + '/' + team, () => memo(k, () => render(unitModel(type, faction, frame, carry, chopping), { ...UNIT_VIEW, yaw: dir * 45 })).toCanvas(lut(team)));
+  return memo(k + '/' + team, () => memo(k, () => traced(k, () => render(unitModel(type, faction, frame, carry, chopping), { ...UNIT_VIEW, yaw: dir * 45 }))).toCanvas(lut(team)));
 }
 export function corpseSprite(type, faction, team, stage) {
   return memo(`corpse${type}${faction}${stage}/${team}`, () => {
@@ -51,7 +96,8 @@ export const BUILD_OFF = { x: B_PAD.l, y: B_PAD.t }; // draw at (tileX - x, tile
 // before any unit, tree or building, so it can never paint over a neighbour standing close by;
 // the structure itself then takes part in the depth sort.
 function buildingTop(type, faction, stage) {
-  return memo(`bt${type}${type === 'mine' ? 0 : faction}${stage}`, () => { const m = buildingModel(type, faction, stage), v = buildingView(m); return { top: render(m.prims, v), v, n: m.n }; });
+  const k = `bt${type}${type === 'mine' ? 0 : faction}${stage}`;
+  return memo(k, () => { const m = buildingModel(type, faction, stage), v = buildingView(m); return { top: traced(k, () => render(m.prims, v)), v, n: m.n }; });
 }
 function buildingImg(type, faction, stage) {
   return memo(`b${type}${type === 'mine' ? 0 : faction}${stage}`, () => {
@@ -322,7 +368,7 @@ export function cursorSprite(kind) {
 const warmQ = [];
 export function prewarm(factions) {
   const frames = ['idle', 'walk0', 'walk1', 'walk2', 'walk3', 'atk0', 'atk1', 'atk2'];
-  const img = (type, f, fr, carry, chop, dir) => () => memo(`u${type}${f}${fr}${carry || ''}${chop ? 'c' : ''}${dir}`, () => render(unitModel(type, f, fr, carry, chop), { ...UNIT_VIEW, yaw: dir * 45 }));
+  const img = (type, f, fr, carry, chop, dir) => () => { const k = `u${type}${f}${fr}${carry || ''}${chop ? 'c' : ''}${dir}`; return memo(k, () => traced(k, () => render(unitModel(type, f, fr, carry, chop), { ...UNIT_VIEW, yaw: dir * 45 }))); };
   warmQ.push(() => buildingImg('mine', 0, 2));
   for (const f of factions) {
     for (const t of ['hall', 'farm', 'barracks', 'mill', 'stable', 'forge', 'tower']) warmQ.push(() => buildingImg(t, f, 2));

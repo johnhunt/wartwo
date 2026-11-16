@@ -115,6 +115,8 @@ export class Lockstep {
     this.dropped = new Map(); // slot -> from turn
     this.turns = new Map();   // turn -> Map(slot -> cmds)
     this.local = [];
+    this.hist = new Map();    // turn -> Map(slot -> cmds) for recently executed turns (needed if a peer drops)
+    this.leaving = new Map(); // slot -> { turns, waiting:Set(slot), timer } while a drop is being settled
     this.waiting = false; this.desync = false; this.myHashes = new Map(); this.theirHashes = new Map();
     this.online = !!lobby && this.humans.length > 1;
     this.delay = this.online ? DELAY : 1;
@@ -124,7 +126,7 @@ export class Lockstep {
       lobby.on('turn', (d, peer) => { const s = this.peerOf.indexOf(peer); if (s >= 0) this.put(d.turn, s, d.cmds); });
       lobby.on('hash', (d, peer) => { this.theirHashes.set(d.turn, d.h); this.checkHash(d.turn); });
       lobby.on('peerLeave', (peer) => this.onLeave(peer));
-      lobby.on('drop', (d) => this.applyDrop(d));
+      lobby.on('drop', (d, peer) => { if (d && d.report) this.onReport(d, peer); else this.applyDrop(d); });
     }
   }
   put(turn, slot, cmds) { let m = this.turns.get(turn); if (!m) { m = new Map(); this.turns.set(turn, m); } if (!m.has(slot)) m.set(slot, cmds); }
@@ -155,6 +157,7 @@ export class Lockstep {
           for (const c of m.get(s)) { c.p = s; cmds.push(c); }
         }
         this.turns.delete(turn);
+        if (this.online) { this.hist.set(turn, m); this.hist.delete(turn - 60); }
       }
       if (this.online && turn % 25 === 0) {
         const h = this.g.hash(); this.myHashes.set(turn, h);
@@ -167,25 +170,53 @@ export class Lockstep {
     if (this.myHashes.has(turn) && this.theirHashes.has(turn) && this.myHashes.get(turn) !== this.theirHashes.get(turn)) this.desync = true;
     if (this.myHashes.size > 40) { const k = [...this.myHashes.keys()].sort((a, b) => a - b)[0]; this.myHashes.delete(k); this.theirHashes.delete(k); }
   }
-  // When a peer disconnects, the lowest remaining human slot decides the drop turn and relays
-  // everything it has from that peer so all survivors stay in step.
+  // When a peer disconnects, its last few turns may have reached some survivors and not others.
+  // Every survivor reports what it holds from that peer to the arbiter (the lowest remaining human
+  // slot). The arbiter merges the reports, so nothing anyone has already executed is lost, picks
+  // the turn on which the peer resigns, and tells everyone. All survivors then agree exactly.
+  held(slot) {
+    const turns = {};
+    for (const [t, m] of this.hist) if (m.has(slot)) turns[t] = m.get(slot);
+    for (const [t, m] of this.turns) if (m.has(slot)) turns[t] = m.get(slot);
+    return turns;
+  }
   onLeave(peer) {
     const slot = this.peerOf.indexOf(peer); if (slot < 0 || this.dropped.has(slot)) return;
-    const alive = this.humans.filter(s => s !== slot && !this.dropped.has(s));
-    if (alive[0] !== this.mySlot) return; // not the arbiter
-    let maxT = this.g.tick / TURN_TICKS | 0; const turns = {};
-    for (const [t, m] of this.turns) if (m.has(slot)) { turns[t] = m.get(slot); if (t > maxT) maxT = t; }
-    const d = { slot, at: maxT + 1, turns };
-    this.lobby.send('drop', d, this.peers().filter(p => p !== peer));
+    // a survivor we were waiting on has gone too: stop waiting for it
+    for (const [s, L] of this.leaving) if (L.waiting.delete(slot) && !L.waiting.size) this.settle(s);
+    const alive = this.humans.filter(s => s !== slot && !this.dropped.has(s) && !this.leaving.has(s));
+    const arbiter = alive[0];
+    if (arbiter !== this.mySlot) { this.lobby.send('drop', { report: true, slot, turns: this.held(slot) }, [this.peerOf[arbiter]].filter(Boolean)); return; }
+    const L = { turns: this.held(slot), waiting: new Set(alive.filter(s => s !== this.mySlot)) };
+    this.leaving.set(slot, L);
+    if (!L.waiting.size) this.settle(slot);
+    else L.timer = setTimeout(() => this.settle(slot), 2500); // don't hang the game on a report that never comes
+  }
+  onReport(d, peer) {
+    const from = this.peerOf.indexOf(peer); let L = this.leaving.get(d.slot);
+    if (!L) { // the report beat our own notice that the peer left
+      if (this.dropped.has(d.slot) || !Number.isInteger(d.slot)) return;
+      this.onLeave(this.peerOf[d.slot]); L = this.leaving.get(d.slot); if (!L) return;
+    }
+    for (const t in d.turns) if (!(t in L.turns) && Array.isArray(d.turns[t])) L.turns[t] = d.turns[t];
+    L.waiting.delete(from);
+    if (!L.waiting.size) this.settle(d.slot);
+  }
+  settle(slot) {
+    const L = this.leaving.get(slot); if (!L) return;
+    this.leaving.delete(slot); clearTimeout(L.timer);
+    let maxT = this.g.tick / TURN_TICKS | 0; for (const t in L.turns) if (+t > maxT) maxT = +t;
+    const d = { slot, at: maxT + 1, turns: L.turns };
+    this.lobby.send('drop', d, this.peers().filter(p => p !== this.peerOf[slot]));
     this.applyDrop(d);
   }
   applyDrop(d) {
-    if (this.dropped.has(d.slot)) return;
-    for (const t in d.turns) this.put(+t, d.slot, d.turns[t]);
-    this.put(d.at, d.slot, [{ t: 'resign' }]);
+    if (!d || this.dropped.has(d.slot) || !Number.isInteger(d.at)) return;
+    const set = (t, cmds) => { let m = this.turns.get(t); if (!m) { m = new Map(); this.turns.set(t, m); } m.set(d.slot, cmds); };
+    // the arbiter's word replaces whatever we happened to hold for the turns still ahead of us
+    for (let t = (this.g.tick / TURN_TICKS | 0); t < d.at; t++) set(t, Array.isArray(d.turns[t]) ? d.turns[t] : []);
+    set(d.at, [{ t: 'resign' }]);
     this.dropped.set(d.slot, d.at + 1);
-    // fill gaps between now and `at` with empty turns
-    for (let t = (this.g.tick / TURN_TICKS | 0); t <= d.at; t++) this.put(t, d.slot, []);
   }
 }
 
