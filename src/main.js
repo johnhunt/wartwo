@@ -553,9 +553,10 @@ function drawTitleBackdrop(now) {
   const ctx = cv.getContext('2d');
   if (!backdrop) {
     backdrop = new Game({ seed: 4242, size: 64, players: [{ name: 'a', faction: 0, color: 1, ai: true }, { name: 'b', faction: 1, color: 0, ai: true }] });
-    for (let i = 0; i < 3000; i++) { backdrop.step([]); backdrop.events.length = 0; }
     backdrop.R = new Renderer(cv, backdrop, -1); backdrop.R.revealAll = true; backdrop.t = 0;
   }
+  // fast-forward the demo battle a slice per frame instead of freezing the page while it catches up
+  const t0 = performance.now(); while (backdrop.tick < 3000 && !backdrop.over && performance.now() - t0 < 6) { backdrop.step([]); backdrop.events.length = 0; }
   backdrop.step([]); for (const ev of backdrop.events) backdrop.R.onEvent(ev); backdrop.events.length = 0;
   if (backdrop.over) backdrop = null;
   else {

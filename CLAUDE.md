@@ -14,5 +14,5 @@
   After changing `src/palette.js`, `r3d.js`, `img.js`, `units.js`, `buildings.js` or `sprites.js`, re-bake it with
   `node tools/bake-sprites.mjs` (needs the `playwright` package) and commit the result. A stale pack is detected and ignored
   (the game renders live instead), so it is never wrong, only slow.
-- Headless checks used so far: AI-vs-AI games with invariant checks, a command fuzzer, movement scenarios and a simulated
-  lockstep network (latency, dropped peers). Re-create them when touching `src/sim.js`, `src/ai.js` or `src/net.js`.
+- Headless checks live in `tools/checks/` (see its README): AI-vs-AI games with invariant checks, a command fuzzer,
+  movement scenarios and a simulated lockstep network. Run them after touching `src/sim.js`, `src/ai.js`, `src/map.js` or `src/net.js`.

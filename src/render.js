@@ -27,6 +27,7 @@ export class Renderer {
     this.explored = new Uint8Array(N); this.visible = new Uint8Array(N);
     this.chunks = new Map();
     this.effects = []; this.texts = []; this.frame = 0; this.revealAll = false;
+    this.known = new Map(); // enemy buildings as last seen: id -> { id, type, owner, x, y, size, stage }
     const l0 = S.lut(0);
     this.waterPat = []; for (let f = 0; f < WATER_FRAMES; f++) this.waterPat.push(this.ctx.createPattern(waterFrame(f).toCanvas(l0), 'repeat'));
     this.trees = [0, 1, 2, 3, 4, 5].map(v => treeClump(v).toCanvas(l0));
@@ -74,6 +75,20 @@ export class Renderer {
     for (let y = e.y; y < e.y + e.size; y++) for (let x = e.x; x < e.x + e.size; x++) if (this.visible[y * W + x]) return true;
     return false;
   }
+  // Fog of war for buildings: you know an enemy building only once you have actually seen it, and under
+  // the fog you keep seeing it as it was then, even if it has since been finished or destroyed.
+  all() { return this.revealAll || this.me < 0; }
+  stageNow(e) { return e.built ? 2 : (e.progress / BUILDINGS[e.type].time < 0.4 ? 0 : 1); }
+  updateKnown() {
+    if (this.all()) return;
+    for (const e of this.g.ents) if (!e.unit && !e.dead && e.owner >= 0 && !this.ally(e.owner) && this.isVisible(e)) this.known.set(e.id, { ghost: true, id: e.id, type: e.type, owner: e.owner, x: e.x, y: e.y, size: e.size, stage: this.stageNow(e) });
+    for (const [id, k] of this.known) if (!this.g.get(id) && this.isVisible(k)) this.known.delete(id); // we can see it is gone
+  }
+  knows(e) { return e.owner < 0 ? this.isExplored(e) : this.all() || this.ally(e.owner) || this.known.has(e.id); }
+  // the construction stage to draw: the real one if we can see it, otherwise the remembered one
+  stageOf(e) { const k = !this.all() && e.owner >= 0 && !this.ally(e.owner) && !this.isVisible(e) ? this.known.get(e.id) : null; return k ? k.stage : this.stageNow(e); }
+  // remembered buildings that no longer exist (the player hasn't seen the ruin yet)
+  ghosts() { const out = []; if (!this.all()) for (const [id, k] of this.known) if (!this.g.get(id)) out.push(k); return out; }
   isExplored(e) {
     if (this.revealAll || this.me < 0) return true;
     const W = this.g.w;
@@ -121,7 +136,7 @@ export class Renderer {
     if (this.screenVer !== SCREEN.ver || ctx.imageSmoothingEnabled) { this.screenVer = SCREEN.ver; this._hud = null; ctx.imageSmoothingEnabled = false; this.clampCam(); }
     // animation runs on the clock, not the frame count, so it looks the same on 60 Hz and 144 Hz screens
     const now = performance.now(), dtf = Math.min(4, (now - (this.lastT ?? now)) / (1000 / 60)); this.lastT = now;
-    if (this.frame % 6 === 0) this.computeVis();
+    if (this.frame % 6 === 0) { this.computeVis(); this.updateKnown(); }
     ctx.save();
     ctx.beginPath(); ctx.rect(VIEW.x, VIEW.y, VIEW.w, VIEW.h); ctx.clip();
     ctx.translate(VIEW.x - this.cam.x, VIEW.y - this.cam.y);
@@ -140,10 +155,11 @@ export class Renderer {
     }
     const tx0 = Math.floor(this.cam.x / TILE), ty0 = Math.floor(this.cam.y / TILE), tx1 = Math.min(g.w - 1, tx0 + Math.ceil(VIEW.w / TILE) + 1), ty1 = Math.min(g.h - 1, ty0 + 15);
     // building ground layers (earth and shadows) lie under everything that stands on the map
-    for (const e of g.ents) {
-      if (e.unit || e.dead || e.x + e.size < tx0 - 2 || e.x > tx1 + 2 || e.y + e.size < ty0 - 2 || e.y > ty1 + 4 || !this.isExplored(e)) continue;
-      const P = g.players[e.owner], d = BUILDINGS[e.type];
-      ctx.drawImage(S.buildingGround(e.type, P ? P.faction : 0, e.built ? 2 : (e.progress / d.time < 0.4 ? 0 : 1)), e.x * TILE - BO.x, e.y * TILE - BO.y);
+    const ghosts = this.ghosts();
+    for (const e of g.ents.concat(ghosts)) {
+      if (e.unit || e.dead || e.x + e.size < tx0 - 2 || e.x > tx1 + 2 || e.y + e.size < ty0 - 2 || e.y > ty1 + 4 || !(e.ghost || this.knows(e))) continue;
+      const P = g.players[e.owner];
+      ctx.drawImage(S.buildingGround(e.type, P ? P.faction : 0, e.ghost ? e.stage : this.stageOf(e)), e.x * TILE - BO.x, e.y * TILE - BO.y);
     }
     // ground effects
     for (const f of this.effects) {
@@ -158,9 +174,10 @@ export class Renderer {
       if (e.dead || e.hidden) continue;
       if (e.x + e.size < tx0 - 1 || e.x > tx1 + 1 || e.y + e.size < ty0 - 1 || e.y > ty1 + 2) continue;
       if (e.unit) { if (!this.ally(e.owner) && !this.isVisible(e)) continue; }
-      else if (!this.isExplored(e)) continue;
+      else if (!this.knows(e)) continue;
       list.push(e);
     }
+    for (const k of ghosts) if (!(k.x + k.size < tx0 - 1 || k.x > tx1 + 1 || k.y + k.size < ty0 - 1 || k.y > ty1 + 2)) list.push(k);
     const posOf1 = (e) => {
       if (e.unit && e.mp <= 0) {
         // melee fighters lean in on whatever they are hitting, so blows visibly connect
@@ -206,6 +223,7 @@ export class Renderer {
     for (const e of list) if (!e.prop && sel.has(e.id)) { const [px, py] = posOf(e); this.selBox(e, px, py); }
     for (const e of list) {
       if (e.prop) { ctx.drawImage(e.prop, e.x * TILE - e.ox, e.y * TILE - e.oy); continue; }
+      if (e.ghost) { const GP = g.players[e.owner]; ctx.drawImage(S.buildingSprite(e.type, GP.faction, GP.color, e.stage), e.x * TILE - BO.x, e.y * TILE - BO.y); continue; }
       const [px, py] = posOf(e); e._px = px; e._py = py;
       const P = g.players[e.owner], team = P ? P.color : 0, fac = P ? P.faction : 0;
       if (e.unit) {
@@ -220,9 +238,9 @@ export class Renderer {
         ctx.globalAlpha = 1;
       } else {
         const d = BUILDINGS[e.type];
-        const stage = e.built ? 2 : (e.progress / d.time < 0.4 ? 0 : 1);
+        const stage = this.stageOf(e), fogged = !this.all() && e.owner >= 0 && !this.ally(e.owner) && !this.isVisible(e);
         ctx.drawImage(S.buildingSprite(e.type, fac, team, stage), px - BO.x, py - BO.y);
-        if (e.built && e.type !== 'mine' && e.hp < e.maxHp / 2) {
+        if (e.built && e.type !== 'mine' && e.hp < e.maxHp / 2 && !fogged) {
           const big = e.hp < e.maxHp / 4, fr = (Math.floor(now / 66) + e.id) % S.FIRE_FRAMES, s = e.size * TILE;
           const flame = (f, isBig, x, y) => { const sp = S.fireSprite(f % S.FIRE_FRAMES, isBig); ctx.drawImage(sp, Math.round(x) - sp.ax, Math.round(y) - sp.ay); };
           // back to front so nearer flames overlap the ones behind
@@ -384,10 +402,11 @@ export class Renderer {
     for (const e of g.ents) {
       if (e.dead || e.hidden) continue;
       if (e.unit && !this.ally(e.owner) && !this.isVisible(e)) continue;
-      if (!e.unit && !this.isExplored(e)) continue;
+      if (!e.unit && !this.knows(e)) continue;
       mc.fillStyle = e.owner < 0 ? '#ffe040' : teamCSS(g.players[e.owner].color);
       const s = Math.max(2, e.size * sc); mc.fillRect(e.x * sc, e.y * sc, s, s);
     }
+    for (const k of this.ghosts()) { mc.fillStyle = teamCSS(g.players[k.owner].color); const s = Math.max(2, k.size * sc); mc.fillRect(k.x * sc, k.y * sc, s, s); }
     mc.drawImage(this.miniFog, 0, 0, MINI.s, MINI.s);
     mc.strokeStyle = '#fff'; mc.lineWidth = 1;
     mc.strokeRect(this.cam.x / TILE * sc + 0.5, this.cam.y / TILE * sc + 0.5, VIEW.w / TILE * sc, VIEW.h / TILE * sc);
@@ -568,7 +587,7 @@ export class Renderer {
       const px = e._px ?? e.x * TILE, py = e._py ?? e.y * TILE, s = e.size * TILE;
       if (wx >= px && wx < px + s && wy >= py && wy < py + s) {
         if (e.unit && !this.ally(e.owner) && !this.isVisible(e)) continue;
-        if (!e.unit && !this.isExplored(e)) continue;
+        if (!e.unit && !this.knows(e)) continue;
         if (!best || (e.unit && !best.unit)) best = e;
       }
     }

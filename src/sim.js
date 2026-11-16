@@ -356,8 +356,10 @@ export class Game {
       if (e.owner < 0 || e.dead) continue;
       const p = this.players[e.owner]; p.alive++;
       if (e.unit) { p.food += UNITS[e.type].food; p.units++; }
-      else if (!e.built || e.train.length) p.busy++;
-      else if (e.built) { p.foodCap += BUILDINGS[e.type].food || 0; p.has[e.type] = (p.has[e.type] || 0) + 1; }
+      else {
+        if (!e.built || e.train.length) p.busy++; // still building or training: the game is not deadlocked
+        if (e.built) { p.foodCap += BUILDINGS[e.type].food || 0; p.has[e.type] = (p.has[e.type] || 0) + 1; }
+      }
     }
     for (const p of this.players) {
       if (!p.defeated && p.alive === 0) { p.defeated = true; this.emit({ t: 'defeat', p: p.id }); }
