@@ -91,6 +91,7 @@ online games too.
 | E | Repair (workers) |
 | Space | Jump to the last alert |
 | Tab | Select the next idle worker |
+| Q | Select the army (on screen, or nearest) |
 | Enter | Chat |
 | F10 | Menu |
 | P | Pause (single player) |

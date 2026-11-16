@@ -189,7 +189,8 @@ function loop(now) {
   ui.paused = frozen && $('menu').classList.contains('hidden');
   updateHover();
   ui.netStatus = LS.online ? (LS.desync ? 'DESYNC!' : LS.waiting ? 'Waiting for players…' : '') : (paused ? 'PAUSED' : '');
-  ui.selection = ui.selection.filter(id => { const e = game.get(id); return e && !e.hidden; });
+  // your own units stay selected while they are inside a mine or a building site (orders wait until they come out)
+  ui.selection = ui.selection.filter(id => { const e = game.get(id); return e && (!e.hidden || e.owner === LS.mySlot); });
   ui.touch = touchMode;
   if (ui.mode === 'place') { ui.placeAt = touchMode && ui.placeFixed ? ui.placeFixed : placeTile(); if (touchMode) ui.mouse.inView = true; }
   if (!paused || LS.online) GA.ambience(now); // a paused world is a silent one
@@ -266,7 +267,7 @@ cv.addEventListener('mousedown', e => {
   }
   if (!inView(x, y)) return;
   if (ui.mode === 'place') {
-    const [tx, ty] = ui.placeAt; const w = mySel().find(u => u.unit && UNITS[u.type].worker);
+    const [tx, ty] = ui.placeAt; const w = builderFor(tx, ty);
     if (w) { issue({ t: 'build', ids: [w.id], btype: ui.buildType, x: tx, y: ty }, 'build'); sfx.play('place'); if (!e.shiftKey) { ui.mode = null; ui.menu = null; } }
     return;
   }
@@ -316,7 +317,8 @@ function boxSelect(d) {
   ui.selection = sel.slice(0, MAX_SELECT).map(e => e.id); ui.menu = null; GA.selected(sel);
 }
 function clickSelect(x, y, shift, all, picked) {
-  const [wx, wy] = R.screenToWorld(x, y); const t = picked !== undefined ? picked : R.entityAt(wx, wy);
+  // a little slack around units: they are small and usually on the move
+  const [wx, wy] = R.screenToWorld(x, y); const t = picked !== undefined ? picked : pickAt(wx, wy, 14);
   if (!t) { if (!shift) { ui.selection = []; ui.menu = null; } return; }
   if (all && t.owner === LS.mySlot && t.unit) {
     const vis = game.ents.filter(e => !e.dead && !e.hidden && e.owner === LS.mySlot && e.type === t.type && e._px >= R.cam.x - 16 && e._px <= R.cam.x + VIEW.w && e._py >= R.cam.y - 16 && e._py <= R.cam.y + VIEW.h);
@@ -368,6 +370,30 @@ function updateHover() {
   const b = btnAt(ui.mouse.x, ui.mouse.y); ui.hoverBtn = b ? b.id : null;
 }
 
+// Select the fighting units: those on screen if there are any, otherwise the ones nearest the view (up to a full group).
+function selectArmy() {
+  const cx = R.cam.x + VIEW.w / 2, cy = R.cam.y + VIEW.h / 2;
+  let army = game.ents.filter(u => u.owner === LS.mySlot && u.unit && !UNITS[u.type].worker && !u.hidden && !u.dead);
+  if (!army.length) { addMsg('No army yet.'); return; }
+  const near = (u) => Math.hypot(u.x * TILE + 16 - cx, u.y * TILE + 16 - cy), seen = army.filter(u => onScreen(u.x, u.y));
+  if (seen.length) army = seen;
+  army.sort((a, b) => near(a) - near(b) || a.id - b.id);
+  ui.selection = army.slice(0, MAX_SELECT).map(u => u.id); ui.menu = null; ui.mode = null; GA.selected([army[0]]);
+  if (!seen.length) R.centerOn(army[0].x * TILE + 16, army[0].y * TILE + 16);
+}
+// Who builds what is being placed: the selected worker, or, if that one has meanwhile gone into a mine or
+// been lost, the nearest worker that is free to walk over (a click should never silently do nothing).
+function builderFor(tx, ty) {
+  const inMine = (u) => u.hidden && game.get(u.inside)?.type === 'mine'; // back out within seconds: it can take the job then
+  const sel = mySel().find(u => u.unit && UNITS[u.type].worker && (!u.hidden || inMine(u))); if (sel) return sel;
+  let best = null, bd = 1e9;
+  for (const u of game.ents) {
+    if (u.owner !== LS.mySlot || !u.unit || !UNITS[u.type].worker || u.hidden || u.dead || (u.order && u.order.type === 'build')) continue;
+    const d = Math.abs(u.x - tx) + Math.abs(u.y - ty) + (u.order ? 6 : 0); if (d < bd) { bd = d; best = u; }
+  }
+  if (!best) { addMsg('No worker is free to build that.'); sfx.play('error'); ui.mode = null; }
+  return best;
+}
 function nextIdleWorker() {
   const idle = game.ents.filter(u => u.owner === LS.mySlot && u.unit && UNITS[u.type].worker && !u.order && !u.hidden && !u.dead);
   if (!idle.length) { addMsg('No idle workers.'); return; }
@@ -381,9 +407,9 @@ function nextIdleWorker() {
 // Tap the info panel to deselect; with nothing selected it offers "idle worker" and "last alert".
 let touchMode = false, tch = null, lastTap = { t: 0, x: 0, y: 0 };
 const INFO = { x: 8, y: 150, w: 160, h: 112 };
-function pickAt(wx, wy) {
+function pickAt(wx, wy, reach = 24) {
   const exact = R.entityAt(wx, wy); if (exact && exact.unit) return exact;
-  let best = null, bd = 24 * 24; // fingers are blunt: take the nearest unit within reach before any building underneath
+  let best = null, bd = reach * reach; // fingers are blunt: take the nearest unit within reach before any building underneath
   for (const e of game.ents) {
     if (!e.unit || e.dead || e.hidden || e._px === undefined || (!R.ally(e.owner) && !R.isVisible(e))) continue;
     const dx = e._px + 16 - wx, dy = e._py + 12 - wy, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = e; }
@@ -396,7 +422,7 @@ function handleTap(x, y, dbl) {
   if (ui.mode === 'place') { // first tap puts the outline down, a tap on the outline builds
     const s = BUILDINGS[ui.buildType].size, f = ui.placeFixed;
     if (f && tx >= f[0] && tx < f[0] + s && ty >= f[1] && ty < f[1] + s) {
-      const w = mySel().find(u => u.unit && UNITS[u.type].worker);
+      const w = builderFor(f[0], f[1]);
       if (w) { issue({ t: 'build', ids: [w.id], btype: ui.buildType, x: f[0], y: f[1] }, 'build'); sfx.play('place'); ui.mode = null; ui.menu = null; }
     } else ui.placeFixed = [Math.floor(wx / TILE - s / 2 + 0.5), Math.floor(wy / TILE - s / 2 + 0.5)];
     return;
@@ -431,7 +457,8 @@ cv.addEventListener('touchstart', e => {
   if (b) { ui.mouseDown = true; ui.hoverBtn = b.id; ui.hoverUntil = performance.now() + 3000; pressButton(b); tch = { kind: 'ui', id }; return; }
   if (x >= INFO.x && x < INFO.x + INFO.w && y >= INFO.y && y < INFO.y + INFO.h) {
     if (ui.selection.length) { ui.selection = []; ui.menu = null; ui.mode = null; }
-    else if (x < INFO.x + INFO.w / 2) nextIdleWorker();
+    else if (x < INFO.x + INFO.w / 3) nextIdleWorker();
+    else if (x < INFO.x + INFO.w * 2 / 3) selectArmy();
     else if (ui.lastAlert) R.centerOn(ui.lastAlert.x * TILE, ui.lastAlert.y * TILE); else addMsg('No alerts yet.');
     return;
   }
@@ -502,6 +529,7 @@ window.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Tab') { e.preventDefault(); nextIdleWorker(); return; }
+  if ((e.key === 'q' || e.key === 'Q') && !e.ctrlKey && !ui.buttons.some(b => b.hot === 'q')) { selectArmy(); return; }
   if (e.key === ' ') { if (ui.lastAlert) R.centerOn(ui.lastAlert.x * TILE, ui.lastAlert.y * TILE); e.preventDefault(); return; }
   if ((e.key === 'p' || e.key === 'P') && !LS.online && !e.ctrlKey) { const hb = ui.buttons.find(b => b.hot === 'p'); if (!hb) { paused = !paused; return; } }
   if (/^[1-9]$/.test(e.key)) {

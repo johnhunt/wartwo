@@ -265,7 +265,7 @@ export class Renderer {
     for (const f of this.effects) if (f.k === 'boom' && f.t >= 0) ctx.drawImage(S.boomSprite(Math.min(4, Math.floor(f.t / 3))), f.x * TILE - 8, f.y * TILE - 8);
     // health bars for selected units, and briefly for anything of yours that has just been hit
     for (const e of list) if (!e.prop && e.unit && !sel.has(e.id) && e.owner === this.me && e.hp < e.maxHp && e.lastHit && g.tick - e.lastHit < 60) this.hpBar(e, e._px, e._py);
-    for (const e of list) if (!e.prop && sel.has(e.id) && e.type !== 'mine') this.hpBar(e, e._px, e._py);
+    for (const e of list) if (!e.prop && sel.has(e.id) && e.type !== 'mine' && (e.unit || this.all() || this.ally(e.owner) || this.isVisible(e))) this.hpBar(e, e._px, e._py);
     // rally point
     if (ui.selection.length === 1) { const b = g.get(ui.selection[0]); if (b && !b.unit && b.rally && b.owner === this.me) this.rallyFlag(b.rally.x * TILE, b.rally.y * TILE); }
     // building ghost
@@ -451,9 +451,9 @@ export class Renderer {
     const ib = { x: 8, y: 150, w: 160, h: 112 };
     const sel = ui.selection.map(id => g.get(id)).filter(Boolean);
     if (ui.touch && !sel.length && P) { // touch shortcuts live in the empty info panel
-      for (const [i, a, b] of [[0, 'Idle', 'worker'], [1, 'Last', 'alert']]) {
-        const bx = ib.x + 6 + i * 76, by = ib.y + 30; ctx.fillStyle = 'rgba(120,96,60,.35)'; ctx.fillRect(bx, by, 72, 52); S.frame(ctx, bx, by, 72, 52, 'steel');
-        this.text(a, bx + 36, by + 12, '#f0d878', 11, 'center'); this.text(b, bx + 36, by + 27, '#f0d878', 11, 'center');
+      for (const [i, a, b] of [[0, 'Idle', 'worker'], [1, 'Select', 'army'], [2, 'Last', 'alert']]) {
+        const bx = ib.x + 4 + i * 51, by = ib.y + 30; ctx.fillStyle = 'rgba(120,96,60,.35)'; ctx.fillRect(bx, by, 49, 52); S.frame(ctx, bx, by, 49, 52, 'steel');
+        this.text(a, bx + 24.5, by + 13, '#f0d878', 10, 'center'); this.text(b, bx + 24.5, by + 27, '#f0d878', 10, 'center');
       }
     } else if (ui.touch && sel.length) this.text('tap here to deselect', ib.x + ib.w / 2, ib.y + ib.h + 1, '#a89878', 8, 'center', false);
     if (sel.length === 1) this.infoSingle(sel[0], ib);
@@ -506,6 +506,8 @@ export class Renderer {
     if (P) this.text(P.name, ib.x + 60, ib.y + 21, teamCSS(P.color), 9, 'left', false);
     const d = def(e.type);
     if (e.type === 'mine') { this.text('Gold left: ' + e.gold, ib.x + 8, ib.y + 50, '#f0d878', 10); return; }
+    // an enemy building under the fog: we only know that it was there
+    if (!e.unit && e.owner >= 0 && !this.all() && !this.ally(e.owner) && !this.isVisible(e)) { this.text('Out of sight.', ib.x + 8, ib.y + 54, '#e8dcc0', 9, 'left', false); this.text('Last seen here.', ib.x + 8, ib.y + 66, '#a89878', 9, 'left', false); return; }
     ctx.fillStyle = '#000'; ctx.fillRect(ib.x + 59, ib.y + 44, 96, 5); const f = e.hp / e.maxHp; ctx.fillStyle = f > 0.5 ? '#1c8a18' : f > 0.25 ? '#a07808' : '#981008'; ctx.fillRect(ib.x + 60, ib.y + 45, 94 * f, 3); ctx.fillStyle = f > 0.5 ? '#58e838' : f > 0.25 ? '#f0d820' : '#f03820'; ctx.fillRect(ib.x + 60, ib.y + 45, 94 * f, 1);
     this.text(`${Math.max(0, e.hp)}/${e.maxHp}`, ib.x + 60, ib.y + 32, '#e0e0e0', 9, 'left', false);
     let y = ib.y + 54;

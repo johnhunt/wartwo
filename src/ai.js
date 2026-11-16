@@ -61,6 +61,22 @@ export function aiTick(g, p) {
     if (workers.length < wantWorkers && hall.built && hall.train.length === 0 && freeFood > 0) cmd(g, p, { t: 'train', ids: [hall.id], utype: 'worker' });
   }
 
+  // --- the hall is gone: raise a new one by the nearest untaken mine (or right where the workers stand)
+  if (!hall && workers.length && !pending('hall') && p.gold >= BUILDINGS.hall.gold && p.wood >= BUILDINGS.hall.wood) {
+    const w = workers.find(x => !x.hidden);
+    if (w) {
+      let target = null, bd = 1e9;
+      for (const m of g.ents) {
+        if (m.dead || m.type !== 'mine' || m.gold < 3000 || (homeReg && !g.touches(homeReg, m.x, m.y, m.size))) continue;
+        if (g.ents.some(e => !e.dead && e.type === 'hall' && g.distEnt(e, m) < 9)) continue;
+        const d = g.distEnt(m, w); if (d < bd) { bd = d; target = m; }
+      }
+      let spot = target && spotNearMine(g, target);
+      for (let r = 2; r < 9 && !spot; r++) for (let dy = -r; dy <= r && !spot; dy++) for (let dx = -r; dx <= r && !spot; dx++) if (g.canPlace('hall', w.x + dx, w.y + dy, w.id)) spot = [w.x + dx, w.y + dy];
+      if (spot) cmd(g, p, { t: 'build', ids: [w.id], btype: 'hall', x: spot[0], y: spot[1] });
+    }
+  }
+
   const free = w => !w.hidden && !w.carry && w.order && w.order.type === 'gather';
   const builder = workers.find(w => free(w) && w.order.kind === 'wood') || workers.find(w => !w.hidden && !w.order) || workers.find(free);
   let building = workers.some(w => w.order && w.order.type === 'build');

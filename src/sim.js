@@ -328,8 +328,15 @@ export class Game {
   }
 
   setOrder(u, o) {
-    if (u.hidden) return; // inside a mine / building
+    // inside a mine or a building site: remember the order and carry it out on the way out
+    if (u.hidden) { u.pending = o || { type: 'stop' }; return; }
     u.order = o; u.path = null; u.wait = 0; u.stuck = 0;
+  }
+
+  // a unit that has just come out of a mine or building takes up any order it was given while inside
+  released(u) {
+    const p = u.pending; if (!p || u.hidden) return;
+    u.pending = null; u.order = p.type === 'stop' ? null : p; u.path = null; u.wait = 0; u.stuck = 0;
   }
 
   canAttack(e) { if (e.unit) return true; const b = BUILDINGS[e.type]; return !!(b.attack && e.built); }
@@ -389,7 +396,7 @@ export class Game {
         b.built = true; b.hp = Math.max(1, b.maxHp - b.dmgTaken);
         const w = this.get(b.builder); if (w) this.popOut(w, b);
         // a worker pulled off the mine or the trees to build goes back to that job afterwards
-        if (w) { const pv = w.order && w.order.prev; w.order = null; if (pv) this.orderGather(w, pv.mine, pv.tx, pv.ty); }
+        if (w) { const pv = w.order && w.order.prev; w.order = null; if (pv) this.orderGather(w, pv.mine, pv.tx, pv.ty); this.released(w); }
         this.emit({ t: 'built', p: b.owner, id: b.id, type: b.type, x: b.x, y: b.y, builder: w ? w.id : 0 });
         this.updatePlayers();
       }
@@ -482,7 +489,7 @@ export class Game {
     else {
       for (let yy = 0; yy < e.size; yy++) for (let xx = 0; xx < e.size; xx++) this.bocc[this.idx(e.x + xx, e.y + yy)] = 0;
       // release units inside
-      for (const o of this.ents) if (!o.dead && o.hidden && o.inside === e.id) { this.popOut(o, e); o.order = null; }
+      for (const o of this.ents) if (!o.dead && o.hidden && o.inside === e.id) { this.popOut(o, e); o.order = null; this.released(o); }
     }
     if (by >= 0 && e.owner >= 0 && by !== e.owner) { this.players[by].kills++; }
     if (e.owner >= 0) this.players[e.owner].lost++;
@@ -661,7 +668,7 @@ export class Game {
     const b = this.get(u.inside);
     if (!b) { // building vanished; find somewhere to stand
       const s = this.freeTileNear(null, u.x, u.y, 10);
-      if (s) { u.hidden = false; u.x = u.px = s[0]; u.y = u.py = s[1]; this.uocc[this.idx(u.x, u.y)] = u.id; u.order = null; } return;
+      if (s) { u.hidden = false; u.x = u.px = s[0]; u.y = u.py = s[1]; this.uocc[this.idx(u.x, u.y)] = u.id; u.order = null; this.released(u); } return;
     }
     if (b.type === 'mine' && u.order && u.order.type === 'gather') {
       if (u.timer > 0) { u.timer--; return; }
@@ -671,11 +678,12 @@ export class Game {
       if (u.hidden) return;
       b.gold -= take; u.carry = take; u.carryKind = 'gold'; u.order.phase = 'ret'; u.path = null;
       this.emit({ t: 'mined', p: u.owner, x: u.x, y: u.y });
+      this.released(u);
       if (b.gold <= 0) { this.emit({ t: 'msg', p: u.owner, text: 'A gold mine has collapsed!', code: 'mine' }); this.kill(b, -1); }
       return;
     }
-    if (b.built && b.type !== 'mine') { this.popOut(u, b); u.order = null; }
-    else if (u.hidden && b.unit === false && b.type === 'mine' && !u.order) this.popOut(u, b);
+    if (b.built && b.type !== 'mine') { this.popOut(u, b); u.order = null; this.released(u); }
+    else if (u.hidden && b.unit === false && b.type === 'mine' && !u.order) { this.popOut(u, b); this.released(u); }
   }
 
   updateGather(u, o) {
